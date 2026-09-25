@@ -23,6 +23,7 @@ from datetime import date
 
 import httpx
 import psycopg2
+import secrets_store
 from playwright.sync_api import sync_playwright
 
 from censo_saude import criar_sessao_empresa, login_saude
@@ -180,17 +181,8 @@ def checar_pares_boleto_nfe(nomes_arquivos: list[str]) -> list[str]:
 LIMITE_ANEXOS_BYTES = 3 * 1024 * 1024
 
 
-def _secret_client():
-    from google.cloud import secretmanager
-
-    return secretmanager.SecretManagerServiceClient()
-
-
 def _get_graph_credenciais(project: str) -> dict:
-    client = _secret_client()
-    name = f"projects/{project}/secrets/graph-noreply-app-only/versions/latest"
-    response = client.access_secret_version(request={"name": name})
-    return json.loads(response.payload.data.decode("utf-8"))
+    return secrets_store.get_json("graph-noreply-app-only", project)
 
 
 def _get_graph_token(creds: dict) -> str:

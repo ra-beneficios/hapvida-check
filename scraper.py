@@ -5,8 +5,8 @@ from datetime import date, datetime
 from urllib.parse import parse_qs, urlparse
 
 import psycopg2
+import secrets_store
 from bs4 import BeautifulSoup
-from google.cloud import secretmanager
 from playwright.sync_api import TimeoutError as PWTimeoutError
 from playwright.sync_api import sync_playwright
 
@@ -42,10 +42,6 @@ class SessionExpiredError(Exception):
 # get_credentials, upsert_pedidos e build_summary.
 
 
-def _secret_client() -> secretmanager.SecretManagerServiceClient:
-    return secretmanager.SecretManagerServiceClient()
-
-
 CODIGOS_CONCESSIONARIA = ("128A", "05FK", "474A", "513A")  # RA + AVR (achado #84)
 
 # #124 (12/08/2026): comissoes migrou do banco isolado "hapvida" pra dentro de "lifetools"
@@ -66,24 +62,16 @@ def list_concessionaria_secrets(project: str) -> list[tuple[str, str]]:
     sistema anti-abuso que já bloqueou a automação do grupo legado com
     captcha. Achado e corrigido no #84.
     """
-    client = _secret_client()
-    parent = f"projects/{project}"
     result = []
-    for secret in client.list_secrets(request={"parent": parent}):
-        secret_id = secret.name.split("/")[-1]
-        if secret_id.startswith(SECRET_PREFIX):
-            codigo = secret_id[len(SECRET_PREFIX):].upper()
-            if codigo in CODIGOS_CONCESSIONARIA:
-                result.append((codigo, secret_id))
+    for secret_id in secrets_store.list_ids(SECRET_PREFIX, project):
+        codigo = secret_id[len(SECRET_PREFIX):].upper()
+        if codigo in CODIGOS_CONCESSIONARIA:
+            result.append((codigo, secret_id))
     return result
 
 
 def get_credentials(project: str, secret_id: str) -> dict:
-    client = _secret_client()
-    name = f"projects/{project}/secrets/{secret_id}/versions/latest"
-    response = client.access_secret_version(request={"name": name})
-    payload = response.payload.data.decode("utf-8")
-    data = json.loads(payload)
+    data = secrets_store.get_json(secret_id, project)
     return {"usuario": data["usuario"], "senha": data["senha"]}
 
 

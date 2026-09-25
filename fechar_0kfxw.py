@@ -20,7 +20,7 @@ from datetime import datetime
 sys.path.insert(0, "/app")
 
 import httpx
-from google.cloud import secretmanager
+import secrets_store
 from playwright.sync_api import sync_playwright
 
 import censo_legado
@@ -44,10 +44,7 @@ def log(msg):
 
 
 def get_creds(secret_id):
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{PROJECT}/secrets/{secret_id}/versions/latest"
-    resp = client.access_secret_version(request={"name": name})
-    return json.loads(resp.payload.data.decode("utf-8"))
+    return secrets_store.get_json(secret_id, PROJECT)
 
 
 def main():
