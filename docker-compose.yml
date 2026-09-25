@@ -1,0 +1,35 @@
+services:
+  hapvida-check:
+    build: .
+    container_name: hapvida-check
+    restart: unless-stopped
+    # UID/GID do superadmin no host - sem isso, arquivos gravados no volume
+    # do SharePoint (/opt/projeto_ra) saem root:root e o rclone bisync
+    # (que roda como superadmin) pode nao conseguir mexer neles depois.
+    user: "1001:1002"
+    environment:
+      GCP_PROJECT: ${GCP_PROJECT}
+      PGHOST: ${PGHOST}
+      PGPORT: ${PGPORT}
+      PGDATABASE: ${PGDATABASE}
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+      TZ: ${TZ:-America/Sao_Paulo}
+      DB_HOST: ${DB_HOST}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+    volumes:
+      # Espelho local do SharePoint "Projeto_RA" (rclone bisync, ~10min) -
+      # onde o processo de envio de documentos grava uma copia de cada
+      # anexo, mesma convencao de nome do Cowork (#152, 31/08/2026).
+      - /opt/projeto_ra/operadoras/hapvida/faturas:/sharepoint/faturas
+    networks:
+      - n8n_default
+      - lifetools_default
+
+networks:
+  n8n_default:
+    external: true
+  lifetools_default:
+    external: true

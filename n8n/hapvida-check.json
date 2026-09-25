@@ -1,0 +1,163 @@
+{
+  "id": "hapvidaCheckV1",
+  "name": "Hapvida - Checagem de Comissoes",
+  "nodes": [
+    {
+      "id": "schedule_trigger",
+      "name": "Schedule - Checagem Diaria",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-600, 0],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "http_run_scraper",
+      "name": "HTTP - Rodar Checagem Hapvida",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-360, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "http://hapvida-check:8000/run",
+        "options": {
+          "timeout": 600000
+        }
+      }
+    },
+    {
+      "id": "if_tem_novidade",
+      "name": "Ha Novos ou Atrasados?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-120, 0],
+      "parameters": {
+        "conditions": {
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "cond_novos",
+              "leftValue": "={{ $json.novos_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "cond_atrasados",
+              "leftValue": "={{ $json.atrasados_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "code_montar_email",
+      "name": "Montar E-mail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [120, -100],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const data = $input.first().json;\n\nfunction formatBRL(v) {\n  return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n}\n\nfunction formatData(iso) {\n  return iso.split('-').reverse().join('/');\n}\n\nfunction buildTable(rows, comDiasEmAberto) {\n  const header = '<tr><th>Concessionaria</th><th>No Pedido</th><th>Lote</th><th>Data Integracao</th><th>Valor</th>' + (comDiasEmAberto ? '<th>Dias em Aberto</th>' : '') + '</tr>';\n  const body = rows.map((r) => {\n    return '<tr><td>' + r.codigo_concessionaria + '</td><td>' + r.numero_pedido + '</td><td>' + (r.lote || '-') + '</td><td>' + formatData(r.data_integracao) + '</td><td>' + formatBRL(r.valor) + '</td>' + (comDiasEmAberto ? '<td>' + r.dias_em_aberto + '</td>' : '') + '</tr>';\n  }).join('');\n  return '<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">' + header + body + '</table>';\n}\n\nlet secoes = '';\n\nif (data.novos && data.novos.length) {\n  secoes += '<h3>Pedidos novos hoje (' + data.novos.length + ')</h3>' + buildTable(data.novos, false);\n}\n\nif (data.atrasados && data.atrasados.length) {\n  secoes += '<h3>Pedidos em aberto atrasados (' + data.atrasados.length + ')</h3>' + buildTable(data.atrasados, true);\n}\n\nconst hoje = new Date().toLocaleDateString('pt-BR');\nconst corpoHtml = '<p>Resumo da checagem de comissoes Hapvida em ' + hoje + ':</p>' + secoes;\nconst assunto = 'Hapvida - Comissoes a resgatar - ' + hoje;\n\nreturn [{ json: { assunto, corpoHtml } }];"
+      }
+    },
+    {
+      "id": "outlook_send_financeiro",
+      "name": "Graph - Notificar Financeiro (noreply)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [360, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/users/noreply@ra-beneficios.com.br/sendMail",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: { subject: $json.assunto, body: { contentType: 'HTML', content: $json.corpoHtml }, toRecipients: [{ emailAddress: { address: 'financeiro@ra-beneficios.com.br' } }] }, saveToSentItems: false }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "7eV3EqGLzMsJYPNp",
+          "name": "Microsoft Graph - App Only (noreply)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule - Checagem Diaria": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Rodar Checagem Hapvida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Rodar Checagem Hapvida": {
+      "main": [
+        [
+          {
+            "node": "Ha Novos ou Atrasados?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ha Novos ou Atrasados?": {
+      "main": [
+        [
+          {
+            "node": "Montar E-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar E-mail": {
+      "main": [
+        [
+          {
+            "node": "Graph - Notificar Financeiro (noreply)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "staticData": {}
+}
