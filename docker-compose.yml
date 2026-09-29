@@ -9,6 +9,9 @@ services:
     user: "1001:1002"
     environment:
       GCP_PROJECT: ${GCP_PROJECT}
+      # file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)
+      SECRETS_BACKEND: ${SECRETS_BACKEND:-file}
+      SECRETS_FILE: /run/portais/portais.json
       PGHOST: ${PGHOST}
       PGPORT: ${PGPORT}
       PGDATABASE: ${PGDATABASE}
@@ -24,6 +27,13 @@ services:
       # onde o processo de envio de documentos grava uma copia de cada
       # anexo, mesma convencao de nome do Cowork (#152, 31/08/2026).
       - /opt/projeto_ra/operadoras/hapvida/faturas:/sharepoint/faturas
+      # Procedimento mensal (faturamento_mensal.py, 28/09/2026): handoff pro
+      # Cowork quando falta arquivo do Legado + planilha de contratos ativos
+      # do Legado (so' leitura - o script le Contrato/Empresa/Status, nunca
+      # as colunas de usuario/senha).
+      - /opt/projeto_ra/_handoff/entrada:/projeto_ra/_handoff/entrada
+      - /opt/projeto_ra/operadoras/Access/Hapvida:/projeto_ra/operadoras/Access/Hapvida:ro
+      - ./secrets:/run/portais:ro
     networks:
       - n8n_default
       - lifetools_default

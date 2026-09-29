@@ -10,13 +10,16 @@ exatamente com as colunas que `bulk_import_faturas.py` já espera).
 funcionava normal com a mesma sessão) e o substituiu por DOIS endpoints
 separados, descobertos navegando a UI de verdade com interceptação de
 rede (login -> Menu > Financeiro > Ver todas as faturas):
-- `unpaid-bills/search` — só faturas em aberto no momento (geralmente
-  vazio se tudo estiver pago, NÃO É o substituto certo pra nosso uso).
-- `historic-bills/search` — **este é o certo**: histórico completo com
-  status por fatura, mesmíssimo schema do endpoint antigo (billingNumber,
-  number, period, dueDate, amount, billType, status, statusCode,
-  healthOperator, remittence, personNumber). Só trocar o nome do
-  endpoint resolveu, nenhum outro campo mudou.
+- `unpaid-bills/search` — faturas em aberto (inclui a do mês corrente).
+- `historic-bills/search` — só as JÁ LIQUIDADAS, mesmíssimo schema do
+  endpoint antigo (billingNumber, number, period, dueDate, amount,
+  billType, status, statusCode, healthOperator, remittence, personNumber).
+
+**Correção 28/09/2026:** até aqui só líamos `historic-bills`, achando que
+era o histórico completo — não é, fatura em aberto nunca aparece nele.
+Resultado: o boleto de OUT26 (já emitido no portal, venc. 10/10) não
+entrava em `faturas` e o envio de documentos baixava SET26 de novo. O
+`bills/search` antigo = união dos dois, então agora consultamos AMBOS.
 
 Reaproveita login/sessão de censo_saude.py e o escopo de códigos
 (Grupo Saúde, sem Odonto Premium) de copart_saude.py.
@@ -64,8 +67,15 @@ def _normalizar_status(status_bruto: str | None) -> str | None:
     return "Pago" if "liquidado" in status_bruto.lower() or "pago" in status_bruto.lower() else "Em Aberto"
 
 
+# Ordem importa pouco (uma fatura nunca está nos dois ao mesmo tempo), mas
+# unpaid por último faz o status "Em Aberto" prevalecer se o portal
+# devolver a mesma fatura nos dois durante a transição de baixa.
+ENDPOINTS_FATURAS = ("historic-bills", "unpaid-bills")
+
+
 def capturar_boletos_contrato(auth: dict, codigo: str, data_inicio: str, data_fim: str) -> list[dict]:
-    """Pagina historic-bills/search inteiro pra 1 código. data_inicio/data_fim em YYYY-MM-DD.
+    """Pagina historic-bills/search e unpaid-bills/search inteiros pra 1 código (ver
+    correção 28/09 no topo). data_inicio/data_fim em YYYY-MM-DD.
 
     Achado 01/08: uma chamada com timeout=60 (uniforme) ficou pendurada por >30min sem
     estourar timeout nem erro — suspeita de handshake TLS travado silenciosamente. Timeout
@@ -73,10 +83,18 @@ def capturar_boletos_contrato(auth: dict, codigo: str, data_inicio: str, data_fi
     única chamada indefinidamente."""
     criar_sessao_empresa(auth, codigo)
 
+    por_chave = {}
+    for endpoint in ENDPOINTS_FATURAS:
+        for linha in _paginar_faturas(auth, codigo, endpoint, data_inicio, data_fim):
+            por_chave[(linha["billing_number"], linha["numero"])] = linha
+    return list(por_chave.values())
+
+
+def _paginar_faturas(auth: dict, codigo: str, endpoint: str, data_inicio: str, data_fim: str) -> list[dict]:
     linhas = []
     offset = 0
     while True:
-        url = f"{API_BASE}/billings/partner-company/{codigo}/historic-bills/search"
+        url = f"{API_BASE}/billings/partner-company/{codigo}/{endpoint}/search"
         params = {"start-date": data_inicio, "end-date": data_fim, "offset": offset, "limit": PAGE_LIMIT}
 
         content = None
@@ -94,7 +112,7 @@ def capturar_boletos_contrato(auth: dict, codigo: str, data_inicio: str, data_fi
             ultimo_erro = r.text[:300]
             time.sleep(2)
         if content is None:
-            raise RuntimeError(f"historic-bills/search falhou {MAX_TENTATIVAS_PAGINA}x pro código {codigo}: {ultimo_erro}")
+            raise RuntimeError(f"{endpoint}/search falhou {MAX_TENTATIVAS_PAGINA}x pro código {codigo}: {ultimo_erro}")
 
         bills = content.get("bills", [])
         for b in bills:
@@ -184,7 +202,7 @@ def registrar_fonte_atualizacao_boletos(total_linhas: int) -> None:
                     (estrutura, contrato_codigo, fonte_sistema, automatizado, cadencia_esperada,
                      ultima_atualizacao, registros_afetados, observacao, atualizado_em)
                 VALUES ('Boletos/Faturas Grupo Saúde', NULL,
-                        'Sistema 1 (portal-empresa, API) — billings/partner-company/{codigo}/historic-bills/search', true,
+                        'Sistema 1 (portal-empresa, API) — billings/partner-company/{codigo}/historic-bills/search + unpaid-bills/search', true,
                         'diário',
                         NOW(), %s,
                         'Só Grupo Saúde (0KFXW/WARQU + coligadas, sem Odonto Premium). Grupo Legado continua sem captura automática (portal diferente, bloqueado por captcha).',
