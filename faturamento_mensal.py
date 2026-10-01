@@ -176,10 +176,14 @@ def status_legado(comp: str) -> dict[str, dict]:
                 continue
             if int(m) != mes or 2000 + int(a[-2:]) != ano:
                 continue
-            info = res.setdefault(linha["Codigo"], {"emitido": False, "tipos": set()})
-            if (linha.get("NumeroDocumento") or "").strip():
+            info = res.setdefault(linha["Codigo"], {"emitido": False, "tipos": set(), "boletos": set()})
+            numero = (linha.get("NumeroDocumento") or "").strip()
+            tipo = linha.get("TipoDocumento", "").strip().upper()
+            if numero:
                 info["emitido"] = True
-                info["tipos"].add(linha.get("TipoDocumento", "").strip().upper())
+                info["tipos"].add(tipo)
+                if tipo == "BOLETO":
+                    info["boletos"].add(numero)
     return res
 
 
@@ -508,10 +512,16 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> di
         pasta = pasta_contrato(codigo, comp, empresa)
         nomes = arquivos(pasta)
         falta = []
-        if not tem(nomes, "BOLETO"):
-            falta.append("Boleto")
-        if not tem(nomes, "NFE"):
-            falta.append("NF")
+        st = status_cw.get(codigo)
+        # Conta como o envio: 1 boleto e 1 NF por boleto emitido no status do
+        # Cowork (Z8TUR/ERQ43/ICBJY tem copart + mensalidade = 2 de cada).
+        esperado = max(len(st["boletos"]) if st else 0, 1)
+        n_bol = sum(_normaliza(n).startswith("BOLETO") for n in nomes)
+        n_nfe = sum(_normaliza(n).startswith("NFE") for n in nomes)
+        if n_bol < esperado:
+            falta.append("Boleto" if esperado == 1 else f"Boleto ({n_bol}/{esperado})")
+        if n_nfe < esperado:
+            falta.append("NF" if esperado == 1 else f"NF ({n_nfe}/{esperado})")
         for ext in (".pdf", ".csv", ".xlsx"):
             if not tem(nomes, "RELATORIO_ANALITICO", ext):
                 falta.append(f"Relatório analítico {ext[1:].upper()}")
@@ -521,8 +531,7 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> di
                 obs.append(f"lista de ativos só em {anterior} (job semanal do Cowork grava no mês corrente)")
             else:
                 falta.append("Lista de ativos")
-        st = status_cw.get(codigo)
-        if "NF" not in falta:
+        if not any(f.startswith("NF") for f in falta):
             obs += enviar_documentos.checar_pares_boleto_nfe(nomes)
         elif st and "NFE" not in st["tipos"]:
             obs.append("NF ainda não emitida pela Hapvida (status do Cowork só tem boleto)")
