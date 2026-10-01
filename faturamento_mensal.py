@@ -108,6 +108,26 @@ def arquivos(pasta: str) -> list[str]:
 _RE_NUMERO_NFSE = re.compile(r"N[ÚU]MERO DA NFS-?E\D{0,200}?(\d{6,12})", re.I | re.S)
 
 
+_RE_COMPETENCIA_NF = re.compile(r"COMPETENCIA\s+(\d{2})(\d{4})")
+
+
+def nfs_do_mes(pasta: str, nomes: list[str], comp: str) -> tuple[list[str], list[str]]:
+    """Separa as NFs da competencia das de outro mes, pela "COMPETENCIA MMAAAA"
+    que a DANFSe do Legado traz no texto (Z8TUR 01/10/2026: NF de SET26 salva
+    como NFE_SAUDE_Z8TUR_OUT26). Sem competencia legivel, conta como do mes."""
+    import pypdf
+    mes, ano = competencia_para_mes(comp)
+    do_mes, outro = [], []
+    for n in nomes:
+        try:
+            texto = "".join(p.extract_text() or "" for p in pypdf.PdfReader(os.path.join(pasta, n)).pages)
+            m = _RE_COMPETENCIA_NF.search(texto)
+        except Exception:
+            m = None
+        (outro if m and (int(m.group(1)), int(m.group(2))) != (mes, ano) else do_mes).append(n)
+    return do_mes, outro
+
+
 def conteudos_distintos(pasta: str, nomes: list[str]) -> set[str]:
     """Identidade de cada documento: o numero da NFS-e lido do PDF (DANFSe do
     Legado traz "NUMERO DA NFS-E"); sem numero, o hash do arquivo. A mesma
@@ -562,11 +582,13 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> di
         # Cowork (Z8TUR/ERQ43/ICBJY tem copart + mensalidade = 2 de cada).
         esperado = max(len(st["boletos"]) if st else 0, 1)
         n_bol = sum(_normaliza(n).startswith("BOLETO") for n in nomes)
-        n_nfe = len(conteudos_distintos(pasta, [n for n in nomes if _normaliza(n).startswith("NFE")]))
+        nfs, nfs_outro_mes = nfs_do_mes(pasta, [n for n in nomes if _normaliza(n).startswith("NFE")], comp)
+        n_nfe = len(conteudos_distintos(pasta, nfs))
         if n_bol < esperado:
             falta.append("Boleto" if esperado == 1 else f"Boleto ({n_bol}/{esperado})")
         if n_nfe < esperado:
             falta.append("NF" if esperado == 1 else f"NF ({n_nfe}/{esperado})")
+        falta += [f"NF de outro mês: {n}" for n in nfs_outro_mes]
         for ext in (".pdf", ".csv", ".xlsx"):
             if not tem(nomes, "RELATORIO_ANALITICO", ext):
                 falta.append(f"Relatório analítico {ext[1:].upper()}")

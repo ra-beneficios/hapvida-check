@@ -256,7 +256,9 @@ def checar_grupo(conn, g, comp, st):
             n_bol = sum(n.startswith("BOLETO") for n in up)
             # conta NF diferente pelo conteudo: a mesma nota com dois nomes (Z8TUR,
             # 01/10/2026) nao pode passar por "2 de 2".
-            n_nfe = len(fm.conteudos_distintos(pasta, [n for n in nomes if n.upper().startswith("NFE")]))
+            nfs, nfs_outro_mes = fm.nfs_do_mes(pasta, [n for n in nomes if n.upper().startswith("NFE")], comp)
+            n_nfe = len(fm.conteudos_distintos(pasta, nfs))
+            faltas += [f"{cod}: NF de outro mês ({n})" for n in nfs_outro_mes]
             s = st.get(cod)
             esperado_bol = len(s["BOLETO"]) if s else 1
             esperado_nfe = max(len(s["NFE"]) if s else 0, esperado_bol)
