@@ -5,7 +5,7 @@ audita TODAS as pastas do mes (Saude + Legado/Cowork) dizendo o que falta.
 
 Cron no host (1h da manha):
 - dia 26 00:01 (--modo=completo): baixa tudo o que ja estiver disponivel no portal.
-- ultimo dia do mes e dia 04, 00:01 (--modo=faltantes): so' o que ainda falta.
+- dia 26 12:01 e dias 27 a 04, 00:01 e 12:01 (--modo=faltantes): so' o que ainda falta.
 
 Competencia = mes do vencimento: rodando do dia 20 em diante, e' o mes
 seguinte (28/09 -> OUT26); antes do dia 20, o proprio mes (04/10 -> OUT26).
@@ -13,6 +13,12 @@ seguinte (28/09 -> OUT26); antes do dia 20, o proprio mes (04/10 -> OUT26).
 Nada aqui manda e-mail pra cliente - so' salva arquivo (enviar_email=False)
 e gera o relatorio de auditoria em faturas/_status/ + handoff pro Cowork
 com o que falta do lado Legado.
+
+Lista de ativos e analitico de copart PDF sao gerados em fila pela Hapvida:
+pedidos numa execucao, coletados na seguinte - por isso, desde 01/10/2026, o
+faltantes roda 2x/dia (00:01 e 12:01) do dia 26 ao dia 04.
+
+Pausar os downloads: criar _status/FATURAMENTO_PAUSADO (so' roda a auditoria).
 
 Uso: python3 faturamento_mensal.py --modo=completo|faltantes [--competencia=OUT26]
 """
@@ -26,6 +32,7 @@ import time
 import unicodedata
 from datetime import date, datetime, timedelta
 
+import httpx
 import openpyxl
 import openpyxl.styles
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -36,7 +43,7 @@ import boletos_saude
 import censo_saude
 import enviar_documentos
 import scraper
-from censo_saude import baixar_relatorio, login_saude
+from censo_saude import login_saude
 
 BASE = enviar_documentos.SHAREPOINT_FATURAS_BASE
 # Mesmo mount do /sharepoint/faturas, dois niveis acima - onde mora o
@@ -243,21 +250,45 @@ def _texto_censo(bruto: bytes) -> str:
     return "\n".join(l for l in texto.splitlines() if l.strip())
 
 
+ESTADO_LISTAS = os.path.join(BASE, "_status", "LISTAS_ATIVOS_ESTADO.json")
+
+
 def salvar_listas_ativos(codigos: dict[str, set[str]], comp: str, modo: str, creds: dict) -> list[str]:
     """Lista de ativos OFICIAL do portal (relatorio Full de beneficiarios da
-    mae, 45 colunas - o mesmo arquivo que o script 160 gera), quebrada por
-    contrato em LISTA_ATIVOS_{codigo}.csv. So' grava arquivo; NAO mexe no
-    banco de vidas (isso continua sendo o 160, manual)."""
+    mae, mesmo arquivo do script 160), quebrada por contrato em
+    LISTA_ATIVOS_{codigo}_{comp}.csv. So' grava arquivo; NAO mexe no banco
+    de vidas (isso continua sendo o 160, manual).
+
+    Assincrono desde 01/10/2026: a Hapvida chega a levar mais de 40 min pra
+    gerar (0KFXW estoura qualquer espera razoavel) e o status do relatorio e'
+    por USUARIO, nao por empresa - um pedido atrasado aparece como resultado
+    do pedido seguinte. Entao: (1) se um relatorio pedido numa execucao
+    anterior ficou pronto, coleta; (2) pede o das maes que ainda tem filho
+    sem lista e espera ate' POLL_TIMEOUT_SECONDS; se nao sair, fica registrado
+    em ESTADO_LISTAS e a proxima execucao coleta. O CSV traz o codigo de cada
+    linha (coluna EMPRESA), entao o arquivo se identifica sozinho: so' grava
+    linha de contrato que ainda falta."""
     alvo = set(codigos) if modo == "completo" else {
         c for c in codigos if not tem(arquivos(pasta_contrato(c, comp)), "LISTA_ATIVOS")
     }
     if not alvo:
         return []
+    gravados: set[str] = set()
+
+    def faltam() -> set[str]:
+        # completo regrava todas; faltantes so' as que nao estao na pasta
+        if modo == "completo":
+            return alvo - gravados
+        return {c for c in alvo if not tem(arquivos(pasta_contrato(c, comp)), "LISTA_ATIVOS")}
+
+    mae_de = _maes_dos_codigos(alvo)
+    estado = _ler_estado_listas()
     erros = []
     grupos = [("carol", censo_saude.MAES_SAUDE)]
     if alvo & set(CODIGOS_CONTA_MARCO):
         grupos.append(("marco", ["DAVJV"]))
     for conta, maes in grupos:
+        st = estado.setdefault(conta, {})
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             page = browser.new_page()
@@ -265,30 +296,105 @@ def salvar_listas_ativos(codigos: dict[str, set[str]], comp: str, modo: str, cre
                 auth = login_saude(page, creds[conta]["usuario"], creds[conta]["senha"])
             finally:
                 browser.close()
-        for i, mae in enumerate(maes):
-            if i:
-                time.sleep(30)  # gerador de relatorio da Hapvida engasga com pedidos colados (18/09)
-            try:
-                bruto = baixar_relatorio(mae, auth, tipo="Full")
-            except Exception as e:
-                erros.append(f"Lista de ativos (mãe {mae}): {e}")
-                log(f"lista ativos {mae}: ERRO {e}")
-                continue
-            leitor = csv.reader(io.StringIO(_texto_censo(bruto)), delimiter=";", quotechar='"')
-            cab = next(leitor)
-            por_codigo: dict[str, list] = {}
-            for linha in leitor:
-                if linha and linha[0] in alvo:
-                    por_codigo.setdefault(linha[0], []).append(linha)
-            for codigo, linhas in por_codigo.items():
-                pasta = pasta_contrato(codigo, comp)
-                os.makedirs(pasta, exist_ok=True)
-                with open(os.path.join(pasta, f"LISTA_ATIVOS_{codigo}_{comp}.csv"), "w", encoding="utf-8", newline="") as f:
-                    w = csv.writer(f, delimiter=";", quotechar='"', quoting=csv.QUOTE_ALL)
-                    w.writerow(cab)
-                    w.writerows(linhas)
-            log(f"lista ativos {mae}: {len(por_codigo)} contrato(s) salvos")
+        coletadas: set[str] = set()  # mae ja' coletada nesta execucao nao e' pedida de novo
+        try:
+            ct = _status_relatorio_full(auth, esperar=True)
+            link = ct.get("downloadLink")
+            if ct.get("status") == "Processed" and link and st.get("pedido") and link != st.get("link_consumido"):
+                gravados |= _gravar_listas(_baixar(link), alvo, comp)
+                log(f"lista ativos: coletado relatório pedido antes (mãe {st['pedido']}, {st.get('pedido_em')})")
+                coletadas.add(st["pedido"])
+                st.update(pedido=None, link_consumido=link)
+                _salvar_estado_listas(estado)
+            for mae in maes:
+                pendentes = faltam()
+                if mae in coletadas or not any(mae_de.get(c) in (mae, None) for c in pendentes):
+                    continue
+                if ct.get("status") == "Processing":
+                    erros.append(f"Lista de ativos: relatório da mãe {st.get('pedido')} ainda em geração na Hapvida — coletado na próxima execução")
+                    break
+                censo_saude.criar_sessao_empresa(auth, mae)
+                censo_saude.gerar_relatorio(auth, mae, "Full")
+                st.update(pedido=mae, pedido_em=datetime.now().isoformat(timespec="minutes"))
+                _salvar_estado_listas(estado)
+                try:
+                    link = censo_saude._poll_status(auth, "Full", link)
+                except censo_saude.RelatorioTimeoutError:
+                    erros.append(f"Lista de ativos (mãe {mae}): pedida, ainda em geração na Hapvida — coletada na próxima execução")
+                    break
+                gravados |= _gravar_listas(_baixar(link), alvo, comp)
+                st.update(pedido=None, link_consumido=link)
+                _salvar_estado_listas(estado)
+                ct = {"status": "Processed", "downloadLink": link}
+        except Exception as e:
+            erros.append(f"Lista de ativos (conta {conta}): {e}")
+            log(f"lista ativos {conta}: ERRO {e}")
+    resto = faltam()
+    if resto:
+        erros.append(f"Lista de ativos ainda faltando: {', '.join(sorted(resto))}")
     return erros
+
+
+def _maes_dos_codigos(codigos: set[str]) -> dict[str, str | None]:
+    """codigo -> mae (o proprio codigo se for mae; None se nao souber)."""
+    conn = psycopg2.connect(dbname="lifetools")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT codigo_externo, codigo_contrato_mae FROM empresa_operadora_codigos "
+                        "WHERE operadora_id = 1 AND codigo_externo = ANY(%s)", (list(codigos),))
+            maes = set(censo_saude.MAES_SAUDE) | {"DAVJV"}
+            return {c: (m or (c if c in maes else None)) for c, m in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def _status_relatorio_full(auth: dict, esperar: bool) -> dict:
+    url = f"{censo_saude.API_BASE}/beneficiaries/status-report?type=Full"
+    inicio = time.time()
+    while True:
+        r = httpx.get(url, headers=censo_saude._headers_http(auth), timeout=30)
+        r.raise_for_status()
+        ct = r.json().get("content", {}) or {}
+        if not esperar or ct.get("status") != "Processing" or time.time() - inicio > censo_saude.POLL_TIMEOUT_SECONDS:
+            return ct
+        time.sleep(censo_saude.POLL_INTERVAL_SECONDS)
+
+
+def _baixar(link: str) -> bytes:
+    r = httpx.get(link, timeout=120)
+    r.raise_for_status()
+    return r.content
+
+
+def _gravar_listas(bruto: bytes, alvo: set[str], comp: str) -> set[str]:
+    leitor = csv.reader(io.StringIO(_texto_censo(bruto)), delimiter=";", quotechar='"')
+    cab = next(leitor)
+    por_codigo: dict[str, list] = {}
+    for linha in leitor:
+        if linha and linha[0] in alvo:
+            por_codigo.setdefault(linha[0], []).append(linha)
+    for codigo, linhas in por_codigo.items():
+        pasta = pasta_contrato(codigo, comp)
+        os.makedirs(pasta, exist_ok=True)
+        with open(os.path.join(pasta, f"LISTA_ATIVOS_{codigo}_{comp}.csv"), "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f, delimiter=";", quotechar='"', quoting=csv.QUOTE_ALL)
+            w.writerow(cab)
+            w.writerows(linhas)
+    log(f"lista ativos: {len(por_codigo)} contrato(s) gravados ({', '.join(sorted(por_codigo)) or '-'})")
+    return set(por_codigo)
+
+
+def _ler_estado_listas() -> dict:
+    try:
+        with open(ESTADO_LISTAS, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _salvar_estado_listas(estado: dict) -> None:
+    with open(ESTADO_LISTAS, "w", encoding="utf-8") as f:
+        json.dump(estado, f, ensure_ascii=False, indent=1)
 
 
 # ---------------------------------------------------------------- xlsx
@@ -476,7 +582,7 @@ def escrever_handoff_cowork(aud: dict) -> str | None:
     corpo = [
         "DE: code | PARA: cowork",
         f"ASSUNTO: Faturamento {comp} — arquivos do Legado faltando na pasta (auditoria automática)",
-        f"CONTEXTO: Auditoria automática do procedimento mensal (dia 26 00:01 completo; último dia do mês e dia 04 00:01 faltantes). Relatório completo em "
+        f"CONTEXTO: Auditoria automática do procedimento mensal (dia 26 00:01 completo; faltantes 2x/dia do dia 26 ao 04). Relatório completo em "
         f"`operadoras/hapvida/faturas/_status/AUDITORIA_FATURAMENTO_{comp}.md`.",
         "",
         "Contratos do Legado com arquivo faltando:",
@@ -522,6 +628,9 @@ def main() -> None:
         sys.exit("uso: faturamento_mensal.py --modo=completo|faltantes [--competencia=OUT26]")
     comp = args.get("competencia") or competencia_padrao(date.today())
     so_auditoria = "--so-auditoria" in sys.argv
+    if not so_auditoria and os.path.exists(os.path.join(BASE, "_status", "FATURAMENTO_PAUSADO")):
+        log("FATURAMENTO_PAUSADO presente em _status/ - nada baixado (só auditoria).")
+        so_auditoria = True
     log(f"inicio - modo {modo}, competencia {comp}")
 
     project = os.environ["GCP_PROJECT"]
