@@ -499,15 +499,34 @@ def _csv_para_xlsx(origem: str, destino: str) -> None:
 
 # ---------------------------------------------------------------- auditoria
 
+def codigos_ja_enviados(comp: str) -> set[str]:
+    """Contratos cujo e-mail de faturamento da competencia ja' saiu (log do
+    envio_faturamento). Nao baixa nem cobra arquivo deles: regra nova vale
+    pra frente, sem reenvio (Andre, 01/10/2026)."""
+    try:
+        with open(os.path.join(BASE, "_status", f"ENVIOS_{comp}.json"), encoding="utf-8") as f:
+            registros = json.load(f)
+    except (OSError, ValueError):
+        return set()
+    return {c for r in registros if r.get("status") in ("enviado", "reenviado") for c in r["codigos"].split("+")}
+
+
 def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> dict:
     status_cw = status_legado(comp)
     anterior = competencia_anterior(comp)
+    enviados = codigos_ja_enviados(comp)
     linhas = []
     for codigo, tipos in sorted(saude.items()):
+        if codigo in enviados:
+            linhas.append({"grupo": "Saúde (Code)", "codigo": codigo, "pasta": pasta_contrato(codigo, comp), "falta": [], "obs": "já enviado"})
+            continue
         falta = faltando_saude(codigo, tipos, comp)
         linhas.append({"grupo": "Saúde (Code)", "codigo": codigo, "pasta": pasta_contrato(codigo, comp), "falta": falta, "obs": ""})
     for codigo, empresa in sorted(legado.items()):
         if codigo in saude:
+            continue
+        if codigo in enviados:
+            linhas.append({"grupo": "Legado (Cowork)", "codigo": codigo, "pasta": pasta_contrato(codigo, comp, empresa), "falta": [], "obs": "já enviado"})
             continue
         pasta = pasta_contrato(codigo, comp, empresa)
         nomes = arquivos(pasta)
@@ -653,9 +672,11 @@ def main() -> None:
         }
         atualizar_faturas(creds)
         saude = contratos_saude(comp)
-        log(f"{len(saude)} contrato(s) Saúde com mensalidade em {comp}")
-        avisos = baixar_documentos_saude(saude, comp, modo, creds)
-        erros_lista = salvar_listas_ativos(saude, comp, modo, creds)
+        enviados = codigos_ja_enviados(comp)
+        a_baixar = {c: t for c, t in saude.items() if c not in enviados}
+        log(f"{len(saude)} contrato(s) Saúde com mensalidade em {comp}, {len(saude) - len(a_baixar)} já enviado(s)")
+        avisos = baixar_documentos_saude(a_baixar, comp, modo, creds)
+        erros_lista = salvar_listas_ativos(a_baixar, comp, modo, creds)
     else:
         saude = contratos_saude(comp)
 

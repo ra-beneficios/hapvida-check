@@ -26,6 +26,7 @@ import html
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -33,6 +34,7 @@ import zipfile
 from datetime import date, datetime
 
 import httpx
+import openpyxl
 import psycopg2
 
 import enviar_documentos as ed
@@ -99,6 +101,49 @@ def status_legado_linhas(comp):
                 r[tipo].add(l["NumeroDocumento"].strip())
             r["venc"] = min(r["venc"], venc)
     return res
+
+
+PLANILHA_CONTATOS = "/projeto_ra/operadoras/Access/Hapvida/empresas_contato_email.xlsx"
+_RE_EMAIL = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def sincronizar_contatos(conn):
+    """Planilha de e-mails do faturamento (mantida pelo time no SharePoint) ->
+    contatos_faturamento, antes de cada envio (Andre, 01/10/2026; ate' aqui era
+    manual). Le' todas as colunas da E em diante (UTC tinha e-mail em K/L sem
+    cabecalho). Contrato que ficar sem nenhum e-mail na planilha mantem o que
+    esta' no banco - nunca apaga lista por planilha mal preenchida."""
+    if not os.path.exists(PLANILHA_CONTATOS):
+        log(f"contatos: planilha não encontrada ({PLANILHA_CONTATOS}) - banco mantido")
+        return []
+    ws = openpyxl.load_workbook(PLANILHA_CONTATOS, read_only=True, data_only=True).worksheets[0]
+    with conn.cursor() as cur:
+        cur.execute("SELECT codigo_externo, emails FROM contatos_faturamento")
+        banco = {c: set(e or []) for c, e in cur.fetchall()}
+    mudancas = []
+    with conn.cursor() as cur:
+        for r in list(ws.iter_rows(values_only=True))[1:]:
+            if not r or len(r) < 5 or not r[1]:
+                continue
+            codigo, emails = str(r[1]).strip(), []
+            for v in r[4:]:
+                for e in _RE_EMAIL.findall(str(v or "")):
+                    if e.lower() not in emails:
+                        emails.append(e.lower())
+            if not emails or set(emails) == banco.get(codigo):
+                continue
+            antes = banco.get(codigo, set())
+            cur.execute(
+                """INSERT INTO contatos_faturamento (codigo_externo, empresa_nome, responsavel_ra, emails, fonte, atualizado_em)
+                   VALUES (%s, %s, %s, %s, %s, now())
+                   ON CONFLICT (codigo_externo) DO UPDATE SET emails = EXCLUDED.emails, fonte = EXCLUDED.fonte, atualizado_em = now()""",
+                (codigo, r[2], r[0], emails, f"empresas_contato_email.xlsx ({date.today():%d/%m})"))
+            mudancas.append(f"{codigo}: +{sorted(set(emails) - antes)} -{sorted(antes - set(emails))}")
+    conn.commit()
+    for m in mudancas:
+        log(f"contatos: {m}")
+    log(f"contatos: {len(mudancas)} contrato(s) atualizados da planilha")
+    return mudancas
 
 
 def montar_grupos(conn, comp):
@@ -305,6 +350,8 @@ def main():
     ja = {frozenset(r["codigos"].split("+")) for r in log_envios if r["status"] == "enviado"}
 
     conn = psycopg2.connect(dbname="lifetools")
+    if enviar:
+        sincronizar_contatos(conn)
     grupos, st = montar_grupos(conn, comp)
     token, enviados_rodada, bloqueados, venc_ref = None, [], [], None
     for g in grupos:
