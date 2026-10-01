@@ -9,9 +9,11 @@ lista no relatorio. Log anti-duplicidade em _status/ENVIOS_{COMP}.json: grupo
 ja enviado nunca e' reenviado.
 
 Agenda (cron no host; procedimento completo em operadoras/hapvida/PROCEDIMENTO_MENSAL.md):
-  dia 27 08:00  1o envio (tudo o que estiver completo)
-  dia 01 08:00  2o envio (o que completou depois)
-  dia 05 08:00  3o envio (--final: relatorio sai mesmo sem envio novo)
+  dia 27 00:01  1o envio (tudo o que estiver completo)
+  dia 01 00:01  2o envio (o que completou depois)
+  dia 05 00:01  envio final (--final): grupo que so' esta' sem NF vai assim
+                mesmo e a NF entra como pendencia no relatorio
+Relatorio de Envios sai ao final de TODO envio, com ou sem envio novo.
 Competencia = mes do vencimento (mesma regra do faturamento_mensal: do dia 20
 em diante e' o mes seguinte).
 
@@ -65,6 +67,7 @@ DESCR = [
 # e' mais baixada; arquivo antigo que ainda esteja na pasta e' ignorado.
 IGNORAR = ("BENEFICIARIOS_ATIVOS",)
 ANEXAVEIS = (".pdf", ".xlsx")
+_RE_FALTA_NF = re.compile(r": (NFE_|NF( \(|$))")
 
 
 def log(msg):
@@ -304,6 +307,9 @@ def enviar_relatorio(token, comp, enviados_rodada, bloqueados, venc_ref):
         arqs = "<br>".join(html.escape(a) for a in r["arquivos"])
         if r.get("zip"):
             arqs = f"<i>(compactados em {html.escape(r['zip'])})</i><br>" + arqs
+        if r.get("pendencias"):
+            arqs += ("<br><span style='color:#b00020'><b>Pendente:</b> "
+                     + html.escape("; ".join(r["pendencias"])) + " (nota fiscal não emitida até o dia 04)</span>")
         linhas += (f"<tr><td {td}>{html.escape(r['cliente'])}</td><td {td}>{r['codigos'].replace('+', '<br>')}</td>"
                    f"<td {td}>{r['data_envio']}</td><td {td}>{len(r['arquivos'])} arquivos:<br>{arqs}</td>"
                    f"<td {td}>{'<br>'.join(html.escape(e) for e in r['emails'])}</td></tr>")
@@ -314,9 +320,15 @@ def enviar_relatorio(token, comp, enviados_rodada, bloqueados, venc_ref):
                    for b in bloqueados)
     pend_html = f"<p><b>Não enviados (arquivo faltando ou sem cadastro):</b></p><ul>{pend}</ul>" if pend else \
         "<p>Nenhum cliente pendente.</p>"
+    com_pend = "".join(f"<li><b>{html.escape(r['cliente'])}</b> ({r['codigos']}): {html.escape('; '.join(r['pendencias']))}</li>"
+                       for r in enviados_rodada if r.get("pendencias"))
+    if com_pend:
+        pend_html = (f"<p><b>Enviados sem nota fiscal (não emitida pela operadora até o dia 04):</b></p><ul>{com_pend}</ul>"
+                     + pend_html)
     corpo = (f"<div style='font-family:sans-serif;color:#222'><h2 style='font-size:18px'>{titulo}</h2>"
              f"<p>Rodada de {datetime.now():%d/%m/%Y %H:%M} — competência {comp}. Cada e-mail só é enviado com todos os "
-             f"documentos completos.</p>{tabela}{pend_html}"
+             f"documentos completos; no envio final (dia 05), nota fiscal ainda não emitida não segura o envio e fica "
+             f"listada como pendência.</p>{tabela}{pend_html}"
              f"<p style='color:#666;font-size:12px'>Enviado por Cora - Assistente Digital - RA Benefícios</p></div>")
     msg = {"message": {"subject": titulo, "body": {"contentType": "HTML", "content": corpo},
                        "toRecipients": [{"emailAddress": {"address": e}} for e in RELATORIO_PARA]},
@@ -330,6 +342,8 @@ def escrever_resumo(comp, log_envios, bloqueados):
           "## Enviados", "", "| Cliente | Códigos | Data | Arquivos | E-mails |", "|---|---|---|---|---|"]
     md += [f"| {r['cliente']} | {r['codigos']} | {r['data_envio']} | {len(r['arquivos'])} | {len(r['emails'])} |"
            for r in log_envios if r["status"] == "enviado"]
+    md += ["", "## Enviados com pendência", ""] + ([f"- {r['cliente']} ({r['codigos']}): {'; '.join(r['pendencias'])}"
+                                                   for r in log_envios if r.get("pendencias")] or ["Nenhum."])
     md += ["", "## Pendentes", ""] + ([f"- {b['cliente']} ({b['codigos']}): {'; '.join(b['faltas'])}" for b in bloqueados]
                                        or ["Nenhum."])
     with open(os.path.join(STATUS_DIR, f"ENVIOS_{comp}.md"), "w", encoding="utf-8") as f:
@@ -365,13 +379,18 @@ def main():
             faltas.append(f"anexo grande demais ({tam/1024/1024:.1f}MB) - precisa de envio por upload session")
         venc_ref = venc_ref or venc
         linha = f"{g['cliente'][:40]:40} {g['chave']:12} {len(anexos):2} arq {tam/1024/1024:5.2f}MB {len(emails)} e-mail(s)"
+        pendencias = []
+        if final and faltas and all(_RE_FALTA_NF.search(f) for f in faltas):
+            # Andre, 01/10/2026: NF que nao saiu ate' o dia 04 nao segura o
+            # faturamento - vai no envio final e a pendencia sai no relatorio.
+            pendencias, faltas = faltas, []
         if faltas:
             bloqueados.append({"cliente": g["cliente"] + (f" - {g['unidade']}" if g["unidade"] else ""),
                                "codigos": g["chave"], "faltas": faltas})
             log(f"BLOQUEADO   {linha} | {'; '.join(faltas)}")
             continue
         if not enviar:
-            log(f"OK (prévia) {linha} venc={venc}")
+            log(f"OK (prévia) {linha} venc={venc}" + (f" | sem: {'; '.join(pendencias)}" if pendencias else ""))
             continue
         token = token or ed._get_graph_token(ed._get_graph_credenciais(os.environ["GCP_PROJECT"]))
         partes = [f"{MODALIDADE[c['modalidade']]} (contrato {c['codigo']})" for c in g["codigos"]]
@@ -389,7 +408,8 @@ def main():
         status = "enviado" if r.status_code == 202 else f"erro HTTP {r.status_code}"
         log(f"{status.upper():11} {linha}" + ("" if r.status_code == 202 else f" | {r.text[:200]}"))
         reg = {"cliente": g["cliente"], "codigos": g["chave"], "data_envio": datetime.now().strftime("%d/%m/%Y %H:%M"),
-               "arquivos": [a[0] for a in anexos], "zip": nz, "emails": emails, "assunto": assunto, "status": status}
+               "arquivos": [a[0] for a in anexos], "zip": nz, "emails": emails, "assunto": assunto, "status": status,
+               "pendencias": pendencias}
         log_envios.append(reg)
         with open(caminho_log, "w", encoding="utf-8") as f:
             json.dump(log_envios, f, ensure_ascii=False, indent=1)
@@ -399,7 +419,7 @@ def main():
             bloqueados.append({"cliente": g["cliente"], "codigos": g["chave"], "faltas": [status]})
     conn.close()
     escrever_resumo(comp, log_envios, bloqueados)
-    if enviar and (enviados_rodada or final):
+    if enviar:  # relatorio ao final de todo envio, com ou sem envio novo (Andre, 01/10/2026)
         token = token or ed._get_graph_token(ed._get_graph_credenciais(os.environ["GCP_PROJECT"]))
         enviar_relatorio(token, comp, enviados_rodada, bloqueados, venc_ref)
     log(f"fim - {len(enviados_rodada)} enviado(s) nesta rodada, {len(bloqueados)} bloqueado(s)")

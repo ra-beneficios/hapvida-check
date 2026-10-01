@@ -3,9 +3,9 @@ Procedimento mensal de faturamento Hapvida (Andre, 28/09/2026): baixa os
 documentos de faturamento do Grupo Saude pra pasta compartilhada e, no fim,
 audita TODAS as pastas do mes (Saude + Legado/Cowork) dizendo o que falta.
 
-Cron no host (1h da manha):
+Cron no host (00:01):
 - dia 26 00:01 (--modo=completo): baixa tudo o que ja estiver disponivel no portal.
-- dia 26 12:01 e dias 27 a 04, 00:01 e 12:01 (--modo=faltantes): so' o que ainda falta.
+- ultimo dia do mes e dia 04, 00:01 (--modo=faltantes): so' o que ainda falta.
 
 Competencia = mes do vencimento: rodando do dia 20 em diante, e' o mes
 seguinte (28/09 -> OUT26); antes do dia 20, o proprio mes (04/10 -> OUT26).
@@ -15,8 +15,7 @@ e gera o relatorio de auditoria em faturas/_status/ + handoff pro Cowork
 com o que falta do lado Legado.
 
 Lista de ativos e analitico de copart PDF sao gerados em fila pela Hapvida:
-pedidos numa execucao, coletados na seguinte - por isso, desde 01/10/2026, o
-faltantes roda 2x/dia (00:01 e 12:01) do dia 26 ao dia 04.
+pedidos numa execucao, coletados na seguinte (26 -> ultimo dia -> 04).
 
 Pausar os downloads: criar _status/FATURAMENTO_PAUSADO (so' roda a auditoria).
 
@@ -610,7 +609,7 @@ def escrever_handoff_cowork(aud: dict) -> str | None:
     corpo = [
         "DE: code | PARA: cowork",
         f"ASSUNTO: Faturamento {comp} — arquivos do Legado faltando na pasta (auditoria automática)",
-        f"CONTEXTO: Auditoria automática do procedimento mensal (dia 26 00:01 completo; faltantes 2x/dia do dia 26 ao 04). Relatório completo em "
+        f"CONTEXTO: Auditoria automática do procedimento mensal (dia 26 00:01 completo; último dia do mês e dia 04 00:01 faltantes). Relatório completo em "
         f"`operadoras/hapvida/faturas/_status/AUDITORIA_FATURAMENTO_{comp}.md`.",
         "",
         "Contratos do Legado com arquivo faltando:",
