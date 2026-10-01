@@ -107,6 +107,46 @@ def baixar_boleto_pdf(auth: dict, codigo: str, billing_number: str) -> bytes:
     return r.content
 
 
+API_V1 = API_BASE.replace("/api/v3", "/api/v1")
+COPART_PDF = "2"  # file-type do portal: 1=CSV, 2=PDF, 3=TXT
+
+
+def relatorio_coparticipacao_pdf(auth: dict, codigo: str, billing_number: str,
+                                 person_number: str, remittence: str) -> tuple[bytes | None, str | None]:
+    """Analitico da fatura de coparticipacao em PDF - o mesmo do botao
+    "Relatorio de coparticipacao > PDF" no detalhe da fatura (Andre,
+    01/10/2026). A Hapvida gera em fila (pedido de KGBQY em 01/10 12:09 ainda
+    nao estava pronto 30 min depois), entao NAO espera: se ja estiver pronto,
+    baixa; se nunca foi pedido, pede e devolve aviso; a proxima execucao do
+    procedimento mensal pega o arquivo. Devolve (pdf, aviso)."""
+    criar_sessao_empresa(auth, codigo)
+    h = _headers_http(auth)
+    params = {"person-number": person_number, "billing-number": billing_number}
+    r = _get_com_retry(f"{API_V1}/billings/coparticipation/bill-report", h, params)
+    itens = (r.json().get("content") or []) if r.status_code == 200 else []
+    for item in itens:
+        if item.get("fileName") and item["fileName"].lower().endswith(".pdf") and item.get("billingExtractId"):
+            r = _get_com_retry(f"{API_V1}/billings/coparticipation", h, {
+                "person-number": person_number, "billing-extract-id": item["billingExtractId"],
+                "file-name": item["fileName"],
+            })
+            link = r.json().get("content") if r.status_code == 200 else None
+            if not link:
+                return None, f"Relatório de coparticipação PDF pronto mas sem link de download ({r.status_code})."
+            d = httpx.get(link, timeout=120)
+            d.raise_for_status()
+            return d.content, None
+    if any(i.get("isSolicited") and str(i.get("fileType", "")).upper() == "PDF" for i in itens):
+        return None, "Relatório de coparticipação PDF já pedido à Hapvida, ainda em geração."
+    r = httpx.post(f"{API_V1}/billings/coparticipation/generate-individual-report", headers=h, timeout=30, json={
+        "person-number": person_number, "remittence-code": remittence,
+        "file-type": COPART_PDF, "billing-number": billing_number,
+    })
+    if r.status_code >= 300:
+        return None, f"Pedido do relatório de coparticipação PDF recusado ({r.status_code}: {r.text[:200]})."
+    return None, "Relatório de coparticipação PDF pedido à Hapvida agora; sai na próxima execução."
+
+
 def _db():
     return psycopg2.connect(dbname="lifetools")
 

@@ -27,7 +27,9 @@ import secrets_store
 from playwright.sync_api import sync_playwright
 
 from censo_saude import criar_sessao_empresa, login_saude
-from documentos_saude import baixar_boleto_pdf, checar_nota_fiscal, checar_relatorio_analitico
+from documentos_saude import (
+    baixar_boleto_pdf, checar_nota_fiscal, checar_relatorio_analitico, relatorio_coparticipacao_pdf,
+)
 
 SENDER = "noreply@ra-beneficios.com.br"
 
@@ -60,7 +62,6 @@ _TIPO_POR_PREFIXO = [
     ("NotaFiscal_Coparticipação_", "NFE_COPARTICIPACAO"),
     ("RelatorioAnalitico_FaturaMensal_", "RELATORIO_ANALITICO"),
     ("Coparticipacao_Analitico_", "COPARTICIPACAO_ANALITICO"),
-    ("Beneficiarios_Ativos_", "BENEFICIARIOS_ATIVOS"),
 ]
 
 
@@ -237,68 +238,16 @@ def _buscar_faturas_contrato(codigo: str) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT DISTINCT ON (bill_type) billing_number, numero, bill_type, vencimento, valor
+                SELECT DISTINCT ON (bill_type) billing_number, numero, bill_type, vencimento, valor,
+                       person_number, remittence
                 FROM faturas f JOIN empresa_operadora_codigos eoc ON eoc.id = f.empresa_operadora_codigo_id
                 WHERE eoc.codigo_externo = %s
                 ORDER BY bill_type, vencimento DESC
                 """,
                 (codigo,),
             )
-            cols = ["billing_number", "numero", "bill_type", "vencimento", "valor"]
+            cols = ["billing_number", "numero", "bill_type", "vencimento", "valor", "person_number", "remittence"]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
-    finally:
-        conn.close()
-
-
-def _buscar_copart_csv(codigo: str) -> bytes | None:
-    conn = psycopg2.connect(dbname="lifetools")
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT count(*) FROM copart_saude_detalhe WHERE contrato_codigo = %s",
-                (codigo,),
-            )
-            if cur.fetchone()[0] == 0:
-                return None
-
-            import io
-
-            buf = io.StringIO()
-            cur.copy_expert(
-                cur.mogrify(
-                    "COPY (SELECT beneficiario_nome, beneficiario_documento, codigo_procedimento, "
-                    "descricao_procedimento, numero_autorizacao, codigo_prestador, nome_prestador, "
-                    "data_autorizacao, valor_coparticipacao, total_coparticipacao_beneficiario, ciclo_referencia "
-                    "FROM copart_saude_detalhe WHERE contrato_codigo = %s ORDER BY data_autorizacao) "
-                    "TO STDOUT WITH CSV HEADER",
-                    (codigo,),
-                ).decode(),
-                buf,
-            )
-            return buf.getvalue().encode("utf-8")
-    finally:
-        conn.close()
-
-
-def _buscar_beneficiarios_ativos_csv(codigo: str) -> bytes | None:
-    conn = psycopg2.connect(dbname="lifetools")
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT count(*) FROM vw_vidas_ativas WHERE codigo_externo = %s", (codigo,))
-            if cur.fetchone()[0] == 0:
-                return None
-
-            buf = io.StringIO()
-            cur.copy_expert(
-                cur.mogrify(
-                    "COPY (SELECT beneficiario_nome, beneficiario_cpf, modalidade, relacao_dependencia, "
-                    "data_adesao FROM vw_vidas_ativas WHERE codigo_externo = %s ORDER BY beneficiario_nome) "
-                    "TO STDOUT WITH CSV HEADER",
-                    (codigo,),
-                ).decode(),
-                buf,
-            )
-            return buf.getvalue().encode("utf-8")
     finally:
         conn.close()
 
@@ -481,17 +430,23 @@ def montar_e_enviar(
                 else:
                     avisos.append(f"Relatório analítico ({tipo}) não retornado pelo portal nesta consulta (billing_number {billing_number}).")
 
-    copart_csv = _buscar_copart_csv(codigo)
-    if copart_csv:
-        nome = f"Coparticipacao_Analitico_{codigo}.csv"
-        anexos.append((nome, "text/csv", copart_csv))
-        anexos_meta.append({"nome": nome, "descricao": "Detalhe por beneficiário e procedimento dos valores de coparticipação do período."})
-
-    beneficiarios_csv = _buscar_beneficiarios_ativos_csv(codigo)
-    if beneficiarios_csv:
-        nome = f"Beneficiarios_Ativos_{codigo}.csv"
-        anexos.append((nome, "text/csv", beneficiarios_csv))
-        anexos_meta.append({"nome": nome, "descricao": "Lista de beneficiários ativos do contrato (nome, CPF, modalidade, dependência, data de adesão)."})
+        # Andre, 01/10/2026: o analitico de coparticipacao e' o PDF oficial do
+        # portal (antes era um CSV montado do nosso banco), e a lista de
+        # ativos e' so' a oficial (LISTA_ATIVOS, do faturamento_mensal) - a
+        # BENEFICIARIOS_ATIVOS do banco saiu.
+        if fatura["bill_type"] != "MENSALIDADE PLANO SAUDE":
+            if fatura.get("person_number") and fatura.get("remittence"):
+                pdf, aviso = relatorio_coparticipacao_pdf(
+                    auth, codigo, billing_number, fatura["person_number"], fatura["remittence"]
+                )
+                if pdf:
+                    nome = f"Coparticipacao_Analitico_{codigo}.pdf"
+                    anexos.append((nome, "application/pdf", pdf))
+                    anexos_meta.append({"nome": nome, "descricao": "Detalhe por beneficiário e procedimento dos valores de coparticipação do período."})
+                if aviso:
+                    avisos.append(aviso)
+            else:
+                avisos.append(f"Relatório de coparticipação PDF: fatura {billing_number} sem person_number/remittence no banco.")
 
     if not anexos:
         return {"status": "erro", "detalhe": "Nenhum documento disponível pra anexar — nada foi enviado.", "avisos": avisos}

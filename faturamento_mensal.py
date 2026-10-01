@@ -4,8 +4,8 @@ documentos de faturamento do Grupo Saude pra pasta compartilhada e, no fim,
 audita TODAS as pastas do mes (Saude + Legado/Cowork) dizendo o que falta.
 
 Cron no host (1h da manha):
-- dia 28 (--modo=completo): baixa tudo o que ja estiver disponivel no portal.
-- dia 04 (--modo=faltantes): so' os contratos/arquivos que ainda faltam.
+- dia 26 00:01 (--modo=completo): baixa tudo o que ja estiver disponivel no portal.
+- ultimo dia do mes e dia 04, 00:01 (--modo=faltantes): so' o que ainda falta.
 
 Competencia = mes do vencimento: rodando do dia 20 em diante, e' o mes
 seguinte (28/09 -> OUT26); antes do dia 20, o proprio mes (04/10 -> OUT26).
@@ -27,6 +27,8 @@ import unicodedata
 from datetime import date, datetime, timedelta
 
 import openpyxl
+import openpyxl.styles
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 import psycopg2
 from playwright.sync_api import sync_playwright
 
@@ -184,6 +186,8 @@ def faltando_saude(codigo: str, tipos: set[str], comp: str) -> list[str]:
             falta.append(f"Boleto {t.lower()}")
         if not tem(nomes, f"NFE_{t}"):
             falta.append(f"NF {t.lower()}")
+    if "COPARTICIPACAO" in tipos and not tem(nomes, "COPARTICIPACAO_ANALITICO", ".pdf"):
+        falta.append("Analítico coparticipação PDF")
     for ext in (".pdf", ".csv", ".xlsx"):
         if not tem(nomes, "RELATORIO_ANALITICO", ext):
             falta.append(f"Relatório analítico {ext[1:].upper()}")
@@ -279,7 +283,7 @@ def salvar_listas_ativos(codigos: dict[str, set[str]], comp: str, modo: str, cre
             for codigo, linhas in por_codigo.items():
                 pasta = pasta_contrato(codigo, comp)
                 os.makedirs(pasta, exist_ok=True)
-                with open(os.path.join(pasta, f"LISTA_ATIVOS_{codigo}.csv"), "w", encoding="utf-8", newline="") as f:
+                with open(os.path.join(pasta, f"LISTA_ATIVOS_{codigo}_{comp}.csv"), "w", encoding="utf-8", newline="") as f:
                     w = csv.writer(f, delimiter=";", quotechar='"', quoting=csv.QUOTE_ALL)
                     w.writerow(cab)
                     w.writerows(linhas)
@@ -297,30 +301,61 @@ def _num(v: str):
 
 
 def gerar_xlsx_relatorios(comp: str) -> int:
-    """O portal so' entrega o analitico em PDF/CSV/TXT (XLSX/XLS da 500,
-    testado 28/09/2026) - geramos o XLSX a partir do CSV oficial, em toda
-    pasta da competencia (Saude e Legado). Valores monetarios do CSV vem em
-    centavos (27000 = R$ 270,00) - convertidos pra reais aqui."""
+    """Todo CSV de relatorio da pasta da competencia (Saude e Legado) ganha
+    um XLSX ao lado (Andre, 01/10/2026). O portal nao oferece XLSX: o
+    analitico so' sai em PDF/CSV/TXT (XLSX/XLS da 500, testado 28/09/2026) e
+    a lista de ativos so' em CSV."""
     gerados = 0
     for empresa in os.listdir(BASE):
         dir_emp = os.path.join(BASE, empresa)
         if empresa.startswith("_") or not os.path.isdir(dir_emp):
             continue
         for codigo in os.listdir(dir_emp):
-            pasta = os.path.join(dir_emp, codigo, comp)
-            for nome in arquivos(pasta):
-                if not (nome.upper().startswith("RELATORIO_ANALITICO") and nome.lower().endswith(".csv")):
-                    continue
-                destino = os.path.join(pasta, nome[:-4] + ".xlsx")
-                origem = os.path.join(pasta, nome)
-                if os.path.exists(destino) and os.path.getmtime(destino) >= os.path.getmtime(origem):
-                    continue
-                try:
-                    _csv_para_xlsx(origem, destino)
-                    gerados += 1
-                except Exception as e:
-                    log(f"xlsx {codigo}: ERRO {e}")
+            gerados += gerar_xlsx_pasta(os.path.join(dir_emp, codigo, comp))
     return gerados
+
+
+def gerar_xlsx_pasta(pasta: str) -> int:
+    gerados = 0
+    for nome in arquivos(pasta):
+        up = nome.upper()
+        if not nome.lower().endswith(".csv") or up.startswith("BENEFICIARIOS_ATIVOS"):
+            continue
+        destino = os.path.join(pasta, nome[:-4] + ".xlsx")
+        origem = os.path.join(pasta, nome)
+        if os.path.exists(destino) and os.path.getmtime(destino) >= os.path.getmtime(origem):
+            continue
+        try:
+            if up.startswith("RELATORIO_ANALITICO"):
+                _csv_para_xlsx(origem, destino)
+            else:
+                _csv_generico_para_xlsx(origem, destino)
+            gerados += 1
+        except Exception as e:
+            log(f"xlsx {nome}: ERRO {e}")
+    return gerados
+
+
+_RE_DECIMAL = re.compile(r"^-?\d+\.\d{1,2}$")
+
+
+def _csv_generico_para_xlsx(origem: str, destino: str) -> None:
+    """Lista de ativos e demais CSVs: tudo como texto (CPF, matricula e
+    codigos tem zero a esquerda), exceto valor com casas decimais (19.80)."""
+    with open(origem, "rb") as f:
+        texto = _texto_censo(f.read())
+    amostra = texto.splitlines()[0] if texto else ""
+    delim = ";" if amostra.count(";") >= amostra.count(",") else ","
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Dados"
+    for i, linha in enumerate(csv.reader(io.StringIO(texto), delimiter=delim, quotechar='"')):
+        valores = [ILLEGAL_CHARACTERS_RE.sub("", v) for v in linha]
+        ws.append([float(v) if i and _RE_DECIMAL.match(v) else v for v in valores])
+    for celula in ws[1]:
+        celula.font = openpyxl.styles.Font(bold=True)
+    ws.freeze_panes = "A2"
+    wb.save(destino)
 
 
 def _csv_para_xlsx(origem: str, destino: str) -> None:
@@ -441,7 +476,7 @@ def escrever_handoff_cowork(aud: dict) -> str | None:
     corpo = [
         "DE: code | PARA: cowork",
         f"ASSUNTO: Faturamento {comp} — arquivos do Legado faltando na pasta (auditoria automática)",
-        f"CONTEXTO: Auditoria automática do procedimento mensal (dias 28 e 04, 1h). Relatório completo em "
+        f"CONTEXTO: Auditoria automática do procedimento mensal (dia 26 00:01 completo; último dia do mês e dia 04 00:01 faltantes). Relatório completo em "
         f"`operadoras/hapvida/faturas/_status/AUDITORIA_FATURAMENTO_{comp}.md`.",
         "",
         "Contratos do Legado com arquivo faltando:",
