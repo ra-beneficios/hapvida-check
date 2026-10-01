@@ -39,8 +39,10 @@ de "detalhes da fatura" por la com os mesmos 3 documentos, (2) capturar a
 URL de rede ao clicar em cada um (Boleto/Nota Fiscal/Relatorio), exatamente
 como foi feito aqui - NAO assumir que os mesmos paths funcionam.
 """
+import io
 import os
 import time
+import zipfile
 
 import httpx
 import psycopg2
@@ -125,7 +127,9 @@ def relatorio_coparticipacao_pdf(auth: dict, codigo: str, billing_number: str,
     r = _get_com_retry(f"{API_V1}/billings/coparticipation/bill-report", h, params)
     itens = (r.json().get("content") or []) if r.status_code == 200 else []
     for item in itens:
-        if item.get("fileName") and item["fileName"].lower().endswith(".pdf") and item.get("billingExtractId"):
+        # Nome real (01/10/2026): EMPRESA_FM_X4ZAT_REMESSA_6365922_PDF.ZIP - um zip com o .PDF dentro.
+        nome = (item.get("fileName") or "").upper()
+        if ("_PDF." in nome or nome.endswith(".PDF")) and item.get("billingExtractId"):
             r = _get_com_retry(f"{API_V1}/billings/coparticipation", h, {
                 "person-number": person_number, "billing-extract-id": item["billingExtractId"],
                 "file-name": item["fileName"],
@@ -135,7 +139,13 @@ def relatorio_coparticipacao_pdf(auth: dict, codigo: str, billing_number: str,
                 return None, f"Relatório de coparticipação PDF pronto mas sem link de download ({r.status_code})."
             d = httpx.get(link, timeout=120)
             d.raise_for_status()
-            return d.content, None
+            if d.content[:2] != b"PK":
+                return d.content, None
+            with zipfile.ZipFile(io.BytesIO(d.content)) as zf:
+                pdfs = [n for n in zf.namelist() if n.lower().endswith(".pdf")]
+                if not pdfs:
+                    return None, f"Relatório de coparticipação: zip {item['fileName']} sem PDF dentro."
+                return zf.read(pdfs[0]), None
     if any(i.get("isSolicited") and str(i.get("fileType", "")).upper() == "PDF" for i in itens):
         return None, "Relatório de coparticipação PDF já pedido à Hapvida, ainda em geração."
     r = httpx.post(f"{API_V1}/billings/coparticipation/generate-individual-report", headers=h, timeout=30, json={
