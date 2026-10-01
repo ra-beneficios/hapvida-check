@@ -179,6 +179,24 @@ def montar_grupos(conn, comp):
     return sorted(finais, key=lambda g: g["cliente"]), st
 
 
+def copart_do_mes(caminho, comp):
+    """O analitico de copart traz o vencimento da fatura (dd/mm/aaaa) no
+    cabecalho; confere que e' o mes da competencia. Sem texto legivel, aceita."""
+    import pypdf
+    mes, ano = fm.competencia_para_mes(comp)
+    try:
+        texto = "".join(p.extract_text() or "" for p in pypdf.PdfReader(caminho).pages[:1])
+    except Exception:
+        return True
+    # cabecalho com o numero da fatura e o vencimento:
+    #   portal novo:   "300076020767 10/10/2026 673,20"
+    #   portal antigo: "1010722558670  5.198,9315/09/2026" (valor grudado na data)
+    venc = re.findall(r"\b\d{10,13}\s+(?:[\d.]+,\d{2}\s*)?\d{2}/(\d{2})/(\d{4})", texto)
+    if not venc:
+        return True
+    return any(int(m) == mes and int(a) == ano for m, a in venc)
+
+
 def lista_ativos_fallback(cod, comp):
     """Legado: o job semanal do Cowork pode ter gravado a lista na pasta do mes
     anterior (feito a mao em 30/09 pro OUT26). Copia se for recente."""
@@ -236,7 +254,9 @@ def checar_grupo(conn, g, comp, st):
             # Legado: NF vem com o numero da nota no nome (sem dizer se e' mensalidade/copart)
             # -> confere por quantidade contra o status do Cowork.
             n_bol = sum(n.startswith("BOLETO") for n in up)
-            n_nfe = sum(n.startswith("NFE") for n in up)
+            # conta NF diferente pelo conteudo: a mesma nota com dois nomes (Z8TUR,
+            # 01/10/2026) nao pode passar por "2 de 2".
+            n_nfe = len(fm.conteudos_distintos(pasta, [n for n in nomes if n.upper().startswith("NFE")]))
             s = st.get(cod)
             esperado_bol = len(s["BOLETO"]) if s else 1
             esperado_nfe = max(len(s["NFE"]) if s else 0, esperado_bol)
@@ -246,6 +266,11 @@ def checar_grupo(conn, g, comp, st):
                 faltas.append(f"{cod}: NF ({n_nfe}/{esperado_nfe})")
             if s and c["modalidade"] == "SAUDE" or (s and venc is None):
                 venc = min(venc, s["venc"]) if venc else s["venc"]
+        for n in nomes:
+            if n.upper().startswith("COPARTICIPACAO_ANALITICO") and n.lower().endswith(".pdf") \
+                    and not copart_do_mes(os.path.join(pasta, n), comp):
+                # Z8TUR 01/10/2026: PDF de SET26 salvo na pasta de OUT26
+                faltas.append(f"{cod}: analítico coparticipação PDF é de outro mês ({n})")
         for n in nomes:
             # Andre, 01/10/2026: cliente recebe so' PDF e XLSX - o CSV fica na
             # pasta como fonte do XLSX; sobra do sync (.sharepoint) tambem fica.

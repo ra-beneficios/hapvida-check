@@ -105,6 +105,33 @@ def arquivos(pasta: str) -> list[str]:
     return sorted(os.listdir(pasta)) if os.path.isdir(pasta) else []
 
 
+_RE_NUMERO_NFSE = re.compile(r"N[ÚU]MERO DA NFS-?E\D{0,200}?(\d{6,12})", re.I | re.S)
+
+
+def conteudos_distintos(pasta: str, nomes: list[str]) -> set[str]:
+    """Identidade de cada documento: o numero da NFS-e lido do PDF (DANFSe do
+    Legado traz "NUMERO DA NFS-E"); sem numero, o hash do arquivo. A mesma
+    nota salva com dois nomes conta uma vez (Z8TUR, 01/10/2026 - os PDFs
+    tinham bytes diferentes)."""
+    import hashlib
+    import pypdf
+    ids = set()
+    for n in nomes:
+        caminho = os.path.join(pasta, n)
+        numero = None
+        try:
+            texto = "".join(p.extract_text() or "" for p in pypdf.PdfReader(caminho).pages)
+            m = _RE_NUMERO_NFSE.search(texto)
+            numero = m and m.group(1)
+        except Exception:
+            pass
+        if not numero:
+            with open(caminho, "rb") as f:
+                numero = "md5:" + hashlib.md5(f.read()).hexdigest()
+        ids.add(numero)
+    return ids
+
+
 def tem(nomes: list[str], prefixo: str, ext: str | None = None) -> bool:
     return any(_normaliza(n).startswith(prefixo) and (ext is None or n.lower().endswith(ext)) for n in nomes)
 
@@ -535,7 +562,7 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> di
         # Cowork (Z8TUR/ERQ43/ICBJY tem copart + mensalidade = 2 de cada).
         esperado = max(len(st["boletos"]) if st else 0, 1)
         n_bol = sum(_normaliza(n).startswith("BOLETO") for n in nomes)
-        n_nfe = sum(_normaliza(n).startswith("NFE") for n in nomes)
+        n_nfe = len(conteudos_distintos(pasta, [n for n in nomes if _normaliza(n).startswith("NFE")]))
         if n_bol < esperado:
             falta.append("Boleto" if esperado == 1 else f"Boleto ({n_bol}/{esperado})")
         if n_nfe < esperado:
