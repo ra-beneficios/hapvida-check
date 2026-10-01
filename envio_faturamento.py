@@ -8,7 +8,7 @@ via Graph como noreply@. NUNCA envia grupo com arquivo faltando - bloqueia e
 lista no relatorio. Log anti-duplicidade em _status/ENVIOS_{COMP}.json: grupo
 ja enviado nunca e' reenviado.
 
-Agenda (cron no host, ver PROCEDIMENTO_MENSAL.md):
+Agenda (cron no host; procedimento completo em operadoras/hapvida/PROCEDIMENTO_MENSAL.md):
   dia 27 08:00  1o envio (tudo o que estiver completo)
   dia 01 08:00  2o envio (o que completou depois)
   dia 05 08:00  3o envio (--final: relatorio sai mesmo sem envio novo)
