@@ -98,7 +98,7 @@ def gerar_relatorio(auth: dict, partner_company: str, tipo: str = "Full") -> Non
     r.raise_for_status()
 
 
-def _poll_status(auth: dict, tipo: str) -> str:
+def _poll_status(auth: dict, tipo: str, link_anterior: str | None = None) -> str:
     url = f"{API_BASE}/beneficiaries/status-report?type={tipo}"
     inicio = time.time()
     while time.time() - inicio < POLL_TIMEOUT_SECONDS:
@@ -106,8 +106,8 @@ def _poll_status(auth: dict, tipo: str) -> str:
         r.raise_for_status()
         body = r.json()
         status = body.get("content", {}).get("status")
-        if status == "Processed":
-            link = body.get("content", {}).get("downloadLink")
+        link = body.get("content", {}).get("downloadLink")
+        if status == "Processed" and link != link_anterior:
             if not link:
                 raise ValueError(f"status Processed mas sem downloadLink: {body}")
             return link
@@ -115,12 +115,31 @@ def _poll_status(auth: dict, tipo: str) -> str:
     raise RelatorioTimeoutError(f"Relatório tipo={tipo} não ficou pronto em {POLL_TIMEOUT_SECONDS}s")
 
 
+def _esperar_fila_livre(auth: dict, tipo: str) -> str | None:
+    """Espera nenhum relatorio estar em processamento e devolve o link do
+    ultimo pronto - o pedido novo so' vale quando aparecer um link diferente."""
+    url = f"{API_BASE}/beneficiaries/status-report?type={tipo}"
+    inicio = time.time()
+    while time.time() - inicio < POLL_TIMEOUT_SECONDS:
+        r = httpx.get(url, headers=_headers_http(auth), timeout=30)
+        r.raise_for_status()
+        content = r.json().get("content", {})
+        if content.get("status") != "Processing":
+            return content.get("downloadLink")
+        time.sleep(POLL_INTERVAL_SECONDS)
+    raise RelatorioTimeoutError(f"Relatório anterior tipo={tipo} ainda em processamento após {POLL_TIMEOUT_SECONDS}s")
+
+
 def baixar_relatorio(partner_company: str, auth: dict, tipo: str = "Full") -> bytes:
     """Fluxo completo pra 1 empresa: cria sessão, dispara geração,
     espera ficar pronto, baixa o CSV (link SAS, sem header extra)."""
     criar_sessao_empresa(auth, partner_company)
+    # O status do relatorio e' por usuario, nao por empresa (achado 01/10/2026:
+    # o pedido de AT2BC devolveu o relatorio de KGBQY que ainda estava em
+    # processamento). Espera o anterior terminar antes de pedir o novo.
+    link_anterior = _esperar_fila_livre(auth, tipo)
     gerar_relatorio(auth, partner_company, tipo)
-    download_link = _poll_status(auth, tipo)
+    download_link = _poll_status(auth, tipo, link_anterior)
     r = httpx.get(download_link, timeout=60)
     r.raise_for_status()
     return r.content

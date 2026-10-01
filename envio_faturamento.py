@@ -203,6 +203,9 @@ def checar_grupo(conn, g, comp, st):
             # pasta como fonte do XLSX; sobra do sync (.sharepoint) tambem fica.
             if not n.lower().endswith(ANEXAVEIS):
                 continue
+            # copart do banco (CSV/XLSX, ate' OUT26) nao vai mais: so' o PDF oficial.
+            if n.upper().startswith("COPARTICIPACAO_ANALITICO") and not n.lower().endswith(".pdf"):
+                continue
             d = descricao(n, modal)
             if d is None:
                 faltas.append(f"{cod}: arquivo inesperado {n}")

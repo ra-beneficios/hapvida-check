@@ -319,7 +319,7 @@ def gerar_xlsx_pasta(pasta: str) -> int:
     gerados = 0
     for nome in arquivos(pasta):
         up = nome.upper()
-        if not nome.lower().endswith(".csv") or up.startswith("BENEFICIARIOS_ATIVOS"):
+        if not nome.lower().endswith(".csv") or up.startswith(("BENEFICIARIOS_ATIVOS", "COPARTICIPACAO_ANALITICO")):
             continue
         destino = os.path.join(pasta, nome[:-4] + ".xlsx")
         origem = os.path.join(pasta, nome)
