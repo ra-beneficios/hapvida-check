@@ -241,7 +241,22 @@ def run_boletos_saude(usuario: str, senha: str, data_inicio: str = None, data_fi
     for codigo in codigos:
         print(f"[boletos_saude] processando {codigo}...", flush=True)
         try:
-            linhas = capturar_boletos_contrato(auth, codigo, data_inicio, data_fim)
+            try:
+                linhas = capturar_boletos_contrato(auth, codigo, data_inicio, data_fim)
+            except Exception as e:
+                # 01/10/2026: a sessao da Hapvida expira no meio da rodada e todo
+                # codigo seguinte dava 401 - reloga uma vez e tenta de novo.
+                if "401" not in str(e):
+                    raise
+                print(f"[boletos_saude] {codigo}: 401, relogando e tentando de novo", flush=True)
+                with sync_playwright() as pw:
+                    browser = pw.chromium.launch()
+                    page = browser.new_page()
+                    try:
+                        auth = login_saude(page, usuario, senha)
+                    finally:
+                        browser.close()
+                linhas = capturar_boletos_contrato(auth, codigo, data_inicio, data_fim)
             resumo = upsert_faturas(linhas, fonte)
             total_novos += resumo["novos"]
             total_atualizados += resumo["atualizados"]

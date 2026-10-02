@@ -53,6 +53,12 @@ PLANILHA_LEGADO = "/projeto_ra/operadoras/Access/Hapvida/empresas_hapvida.xlsx"
 # DAVJV/B6PJX so' abrem com a conta do Marcos/Vinicius (#147) - mesma regra
 # do endpoint /enviar-documentos-contrato.
 CODIGOS_CONTA_MARCO = ("DAVJV", "B6PJX")
+# Contratos ativos SEM faturamento proprio pra baixar/enviar (Andre, 02/10/2026):
+# - 9WLZU/9GBKA (Boaventura): fora do envio por decisao gerencial (so' vidas, #150)
+# - ENUHC (LH) e DLIHM (Heftos): ativos, mas sem movimentacao e sem fatura
+# - 340ZM (Sintramon): ativo, fatura paga dentro de outra nota
+# Continuam ativos no banco - so' saem do escopo de faturamento.
+SEM_FATURAMENTO = {"9WLZU", "9GBKA", "ENUHC", "DLIHM", "340ZM"}
 TENTATIVAS_DOWNLOAD = 3
 PAUSA_ENTRE_TENTATIVAS = 60
 censo_saude.POLL_TIMEOUT_SECONDS = 420  # 0KFXW (~50 coligadas) estoura 240s
@@ -182,7 +188,7 @@ def contratos_saude(comp: str) -> dict[str, set[str]]:
                 por_codigo.setdefault(codigo, set()).add(tipo)
     finally:
         conn.close()
-    return {c: t for c, t in por_codigo.items() if "SAUDE" in t}
+    return {c: t for c, t in por_codigo.items() if "SAUDE" in t and c not in SEM_FATURAMENTO}
 
 
 def contratos_legado() -> dict[str, str]:
@@ -197,7 +203,8 @@ def contratos_legado() -> dict[str, str]:
     ativos = {}
     for r in linhas:
         if r[i_cod] and str(r[i_st] or "").strip().lower() == "ativo":
-            ativos[str(r[i_cod]).strip()] = str(r[i_emp] or "").strip()
+            if str(r[i_cod]).strip() not in SEM_FATURAMENTO:
+                ativos[str(r[i_cod]).strip()] = str(r[i_emp] or "").strip()
     return ativos
 
 
@@ -679,22 +686,37 @@ def escrever_handoff_cowork(aud: dict) -> str | None:
 
 # ---------------------------------------------------------------- main
 
-def atualizar_faturas(creds: dict) -> None:
+def atualizar_faturas(creds: dict) -> list[str]:
     """Faturas em `faturas` (inclui unpaid-bills, correcao 28/09) - senao a
     competencia nova nao aparece e o download pega o mes anterior."""
-    r = boletos_saude.run_boletos_saude(creds["carol"]["usuario"], creds["carol"]["senha"])
-    log(f"faturas (Carol): {r['total_novos']} novas, {r['total_atualizados']} atualizadas")
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        page = browser.new_page()
-        try:
-            auth = login_saude(page, creds["marco"]["usuario"], creds["marco"]["senha"])
-        finally:
-            browser.close()
-    fim = date.today().replace(year=date.today().year + 1).isoformat()
-    linhas = boletos_saude.capturar_boletos_contrato(auth, "DAVJV", "2025-01-01", fim)
-    r = boletos_saude.upsert_faturas(linhas, fonte=f"davjv_marco_{date.today().isoformat()}")
-    log(f"faturas DAVJV (Marcos): {r['novos']} novas, {r['atualizados']} atualizadas")
+    # 02/10/2026: falha aqui (timeout da Hapvida no DAVJV em 01/10) derrubava a
+    # rodada inteira antes do download e das listas. Agora cada parte loga o
+    # erro e segue - o que nao atualizou fica com o que ja estava no banco.
+    erros = []
+    try:
+        r = boletos_saude.run_boletos_saude(creds["carol"]["usuario"], creds["carol"]["senha"])
+        falhas = [x["codigo"] for x in r["resultados"] if x["status"] != "ok"]
+        log(f"faturas (Carol): {r['total_novos']} novas, {r['total_atualizados']} atualizadas"
+            + (f", {len(falhas)} código(s) com erro: {', '.join(falhas)}" if falhas else ""))
+    except Exception as e:
+        erros.append(f"Atualizar faturas (Carol): {e}")
+        log(f"faturas (Carol): ERRO {e}")
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            page = browser.new_page()
+            try:
+                auth = login_saude(page, creds["marco"]["usuario"], creds["marco"]["senha"])
+            finally:
+                browser.close()
+        fim = date.today().replace(year=date.today().year + 1).isoformat()
+        linhas = boletos_saude.capturar_boletos_contrato(auth, "DAVJV", "2025-01-01", fim)
+        r = boletos_saude.upsert_faturas(linhas, fonte=f"davjv_marco_{date.today().isoformat()}")
+        log(f"faturas DAVJV (Marcos): {r['novos']} novas, {r['atualizados']} atualizadas")
+    except Exception as e:
+        erros.append(f"Atualizar faturas DAVJV (Marcos): {e}")
+        log(f"faturas DAVJV (Marcos): ERRO {e}")
+    return erros
 
 
 def main() -> None:
@@ -718,13 +740,21 @@ def main() -> None:
             "carol": scraper.get_credentials(project, "hapvida-portal-saude"),
             "marco": scraper.get_credentials(project, "hapvida-portal-saude-marco"),
         }
-        atualizar_faturas(creds)
+        erros_lista += atualizar_faturas(creds)
         saude = contratos_saude(comp)
         enviados = codigos_ja_enviados(comp)
         a_baixar = {c: t for c, t in saude.items() if c not in enviados}
         log(f"{len(saude)} contrato(s) Saúde com mensalidade em {comp}, {len(saude) - len(a_baixar)} já enviado(s)")
-        avisos = baixar_documentos_saude(a_baixar, comp, modo, creds)
-        erros_lista = salvar_listas_ativos(a_baixar, comp, modo, creds)
+        try:
+            avisos = baixar_documentos_saude(a_baixar, comp, modo, creds)
+        except Exception as e:
+            erros_lista.append(f"Download de documentos Saúde: {e}")
+            log(f"download Saúde: ERRO {e}")
+        try:
+            erros_lista += salvar_listas_ativos(a_baixar, comp, modo, creds)
+        except Exception as e:
+            erros_lista.append(f"Listas de ativos: {e}")
+            log(f"listas de ativos: ERRO {e}")
     else:
         saude = contratos_saude(comp)
 

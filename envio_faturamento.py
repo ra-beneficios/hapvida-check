@@ -19,7 +19,7 @@ em diante e' o mes seguinte).
 
 Pausar tudo: criar o arquivo _status/ENVIO_PAUSADO (qualquer conteudo).
 
-Uso: python3 envio_faturamento.py [--enviar] [--final] [--competencia=NOV26]
+Uso: python3 envio_faturamento.py [--enviar] [--final] [--competencia=NOV26] [--codigos=AT2BC]
 Sem --enviar e' so' previa (nada sai).
 """
 import base64
@@ -45,8 +45,9 @@ import faturamento_mensal as fm
 BASE = ed.SHAREPOINT_FATURAS_BASE
 STATUS_DIR = os.path.join(BASE, "_status")
 RELATORIO_PARA = ["C-level@ra-beneficios.com.br", "financeiro@ra-beneficios.com.br", "relacionamento@ra-beneficios.com.br"]
-# Boaventura: combinado com o Andre, contrato so' de vidas, sem faturamento (#150).
-EXCLUIR = {"9WLZU", "9GBKA"}
+# Contratos sem faturamento proprio (Boaventura, ENUHC, DLIHM, 340ZM) - lista unica em
+# faturamento_mensal.SEM_FATURAMENTO (Andre, 02/10/2026).
+EXCLUIR = fm.SEM_FATURAMENTO
 MODALIDADE = {"SAUDE": "Saúde", "ODONTO_PREMIUM": "Odonto Premium"}
 LIMITE_ENVIO_BYTES = int(3.3 * 1024 * 1024)  # zip de 3,06MB passou em 30/09; acima disso bloqueia
 LISTA_ATIVOS_IDADE_MAX_DIAS = 10
@@ -394,6 +395,9 @@ def main():
     if enviar:
         sincronizar_contatos(conn)
     grupos, st = montar_grupos(conn, comp)
+    if args.get("codigos"):  # envio avulso de um grupo so' (ex: --codigos=AT2BC)
+        so = set(args["codigos"].upper().split(","))
+        grupos = [g for g in grupos if so & set(g["chave"].split("+"))]
     token, enviados_rodada, bloqueados, venc_ref = None, [], [], None
     for g in grupos:
         if frozenset(g["chave"].split("+")) in ja:
