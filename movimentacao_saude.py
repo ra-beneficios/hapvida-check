@@ -171,7 +171,22 @@ def enviar_movimentacao(usuario: str, senha: str, codigo_contrato: str, arquivo_
             )
             if modal_btn.count() == 0:
                 modal_btn = page.locator("button:has-text('Enviar movimentação')").last
-            modal_btn.click()
+            # Achado real (exclusao 2XP6W, 02/10): o POST .../attachments responde DEPOIS dos 3s fixos que
+            # havia aqui - o upload entrou (protocolo 1330271) mas o resultado voltou sem status/body. Espera a
+            # resposta de verdade; se nao vier em 60s, segue sem ela (a checagem por movements-list confirma).
+            try:
+                with page.expect_response(
+                    lambda r: "attachments" in r.url and r.request.method == "POST", timeout=60000
+                ) as resp_info:
+                    modal_btn.click()
+                resp = resp_info.value
+                resultado["status"] = resp.status
+                try:
+                    resultado["body"] = resp.json()
+                except Exception as e:
+                    resultado["erro_parse"] = str(e)
+            except Exception as e:
+                resultado["sem_resposta_upload"] = str(e)[:200]
 
             page.wait_for_timeout(3000)
             resultado["url_final"] = page.url
