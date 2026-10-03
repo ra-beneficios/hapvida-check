@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 import base64
@@ -13,6 +13,7 @@ import copart_saude
 import documentos_legado
 import documentos_saude
 import enviar_documentos
+import exclusao_api
 import movimentacao_saude
 import scraper
 
@@ -221,3 +222,50 @@ def processar_sessao_legado(payload: SessaoLegado):
         payload.contrato_codigo,
         payload.fonte,
     )
+
+
+# ── Motor de Exclusao (Cora: menu Operadoras -> Hapvida -> Realizar Procedimento de Exclusao) ──────────────
+# 3 passos separados, cada um disparado por um clique do solicitante. Nada e' enviado sem o clique em
+# "enviar"; a onda dos dependentes so' depois da dos titulares processada. Ver exclusao_api.py.
+
+class ExclusaoAnalisar(BaseModel):
+    planilha_base64: str
+    nome_arquivo: str
+    solicitante_upn: str
+
+
+class ExclusaoAprovar(BaseModel):
+    lote: str
+    aprovador_upn: str
+    checklist_ok: bool = False
+    decisoes: dict = {}
+
+
+class ExclusaoEnviar(BaseModel):
+    lote: str
+    onda: str
+    hash: str
+    solicitante_upn: str
+
+
+def _exclusao(fn, *args):
+    try:
+        return fn(*args)
+    except exclusao_api.PendenciaAprovacao as e:
+        # regra de negocio (falta decisao, onda fora de ordem, hash diferente...) - 409 com texto pra Cora mostrar
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/exclusao/analisar")
+def exclusao_analisar(p: ExclusaoAnalisar):
+    return _exclusao(exclusao_api.analisar, p.planilha_base64, p.nome_arquivo, p.solicitante_upn)
+
+
+@app.post("/exclusao/aprovar")
+def exclusao_aprovar(p: ExclusaoAprovar):
+    return _exclusao(exclusao_api.aprovar, p.lote, p.aprovador_upn, p.checklist_ok, p.decisoes)
+
+
+@app.post("/exclusao/enviar")
+def exclusao_enviar(p: ExclusaoEnviar):
+    return _exclusao(exclusao_api.enviar, p.lote, p.onda, p.hash, p.solicitante_upn)

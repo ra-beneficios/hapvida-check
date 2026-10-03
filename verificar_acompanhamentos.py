@@ -48,6 +48,7 @@ CORA_NOTIFICAR_ARQUIVO_URL = os.environ.get("CORA_NOTIFICAR_ARQUIVO_URL", "http:
 API_URL = os.environ.get("CONVERTER_ENDPOINT", "http://lifetools-api-1:8000")
 
 STATUS_PT = {
+    "FileProcessed": "Processado sem críticas",
     "FileProcessedWithReview": "Finalizado com críticas",
     "ProcessFileWithPendency": "Processamento com pendência",
     "UnableToStart": "Ainda não iniciou o processamento (transitório)",
@@ -57,7 +58,9 @@ STATUS_PT = {
 # CONFIRMADO como definitivo em movimentacoes antigas (>24h) - qualquer status novo/desconhecido
 # (achado real, 04/09: "ProcessFile" apareceu e nao estava documentado) cai no default seguro
 # de "ainda nao e final", igual "UnableToStart" - nunca declara sucesso/fim cedo demais.
-STATUS_FINAIS_CONHECIDOS = {"FileProcessedWithReview", "ProcessFileWithPendency"}
+# "FileProcessed" (processado sem nenhuma critica) apareceu na 1a exclusao real (protocolo 1330271, 02/10) - sem
+# ele aqui, um envio 100% limpo ficava "em andamento" para sempre.
+STATUS_FINAIS_CONHECIDOS = {"FileProcessed", "FileProcessedWithReview", "ProcessFileWithPendency"}
 
 
 def notificar(upn: str, texto: str) -> bool:
@@ -160,6 +163,15 @@ def processar_linha(cur, linha: dict) -> None:
         f" (arquivo `{nome_no_portal}` no portal)" if nome_no_portal else ""
     )
 
+    # Motor de Exclusao (03/10): o mesmo acompanhamento serve para exclusao - o nome do arquivo diz o tipo.
+    nome_arquivo = linha.get("nome_arquivo") or ""
+    tipo = "exclusão" if nome_arquivo.upper().startswith("EXCLUSAO_") else "inclusão"
+    proxima_onda = (
+        "\n\nA onda dos **titulares** terminou — agora você já pode clicar em **Enviar onda 2 (dependentes)** "
+        "no cartão da exclusão."
+        if "_titulares_" in nome_arquivo else ""
+    )
+
     if status_atual == "AGUARDANDO_CHECAGEM_INICIAL":
         if not movimento:
             cur.execute(
@@ -171,7 +183,7 @@ def processar_linha(cur, linha: dict) -> None:
             )
             notificar(
                 solicitante_upn,
-                f"⚠️ A inclusão do {identificador} não apareceu na lista de movimentações do "
+                f"⚠️ A {tipo} do {identificador} não apareceu na lista de movimentações do "
                 f"portal Hapvida depois de 45 minutos — algo deu errado no upload. Precisa "
                 f"verificar direto no portal ou tentar reenviar.",
             )
@@ -191,9 +203,9 @@ def processar_linha(cur, linha: dict) -> None:
             )
             notificar(
                 solicitante_upn,
-                f"✅ A inclusão do {identificador} já processou no portal Hapvida — status: "
+                f"✅ A {tipo} do {identificador} já processou no portal Hapvida — status: "
                 f"**{status_legivel}**. Se precisar do relatório detalhado de críticas, me avisa "
-                f"que eu busco.",
+                f"que eu busco." + proxima_onda,
             )
         else:
             cur.execute(
@@ -206,7 +218,7 @@ def processar_linha(cur, linha: dict) -> None:
             )
             notificar(
                 solicitante_upn,
-                f"✅ A inclusão do {identificador} subiu com sucesso e está **em movimentação** "
+                f"✅ A {tipo} do {identificador} subiu com sucesso e está **em movimentação** "
                 f"no portal Hapvida. Em até 12h eu confiro de novo e te mando o relatório de "
                 f"críticas, se houver.",
             )
@@ -222,7 +234,7 @@ def processar_linha(cur, linha: dict) -> None:
             )
             notificar(
                 solicitante_upn,
-                f"⚠️ Depois de 12h, a inclusão do {identificador} ainda não aparece na lista de "
+                f"⚠️ Depois de 12h, a {tipo} do {identificador} ainda não aparece na lista de "
                 f"movimentações do portal — precisa verificar.",
             )
             return
@@ -248,11 +260,11 @@ def processar_linha(cur, linha: dict) -> None:
         )
 
         texto = (
-            f"📋 Resultado final da inclusão do {identificador}, 12h depois do envio: "
+            f"📋 Resultado final da {tipo} do {identificador}, 12h depois do envio: "
             f"**{status_legivel}**.\n\n"
         )
         if not vidas:
-            texto += "Nenhuma vida com crítica ou cancelamento — tudo processou certinho. ✅"
+            texto += "Nenhuma vida com crítica ou cancelamento — tudo processou certinho. ✅" + proxima_onda
             notificar(solicitante_upn, texto)
         else:
             texto += f"⚠️ {len(vidas)} vida(s) com crítica ou cancelamento — relatório completo no anexo."

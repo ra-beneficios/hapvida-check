@@ -18,6 +18,9 @@ services:
       PGUSER: ${PGUSER}
       PGPASSWORD: ${PGPASSWORD}
       TZ: ${TZ:-America/Sao_Paulo}
+      MOTOR_EXCLUSAO_PATH: /motor
+      EXCLUSAO_LOTES_DIR: /projeto_ra/movimentacoes/exclusao
+      EXCLUSAO_PRIVADO_DIR: /dados_exclusao
       DB_HOST: ${DB_HOST}
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
@@ -34,6 +37,12 @@ services:
       - /opt/projeto_ra/_handoff/entrada:/projeto_ra/_handoff/entrada
       - /opt/projeto_ra/operadoras/Access/Hapvida:/projeto_ra/operadoras/Access/Hapvida:ro
       - ./secrets:/run/portais:ro
+      # Motor de Exclusao (03/10/2026): codigo do motor (repo lifetools, so' leitura), lotes na pasta padrao
+      # de movimentacoes (sincroniza com o SharePoint) e as fotos de censo/pedidos (dado de TODO o contrato)
+      # numa pasta privada 700 fora do SharePoint.
+      - /opt/lifetools/motor_exclusao:/motor/motor_exclusao:ro
+      - /opt/projeto_ra/operadoras/hapvida/movimentacoes:/projeto_ra/movimentacoes
+      - /home/superadmin/motor_exclusao_dados/lotes:/dados_exclusao
     networks:
       - n8n_default
       - lifetools_default
