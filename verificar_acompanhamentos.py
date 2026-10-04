@@ -134,6 +134,26 @@ def achar_movimento(dados: dict, enviado_em) -> dict | None:
     return candidatos[0][1]
 
 
+def _registrar_recusas_exclusao(linha: dict, codigo_contrato: str, control_code, vidas: list | None) -> str:
+    """Motor de Exclusao (03/10): ao terminar, grava no lote quais vidas a Hapvida recusou - elas voltam a poder ser
+    tratadas. Nunca derruba o acompanhamento. -> texto extra para a notificacao ("" se nada a dizer)."""
+    nome_arquivo = linha.get("nome_arquivo") or ""
+    if not nome_arquivo.upper().startswith("EXCLUSAO_"):
+        return ""
+    try:
+        if vidas is None:
+            vidas = ms.vidas_criticadas_de_movimentacao(os.environ["GCP_PROJECT"], codigo_contrato, control_code).get(
+                "vidasCriticadas") or []
+        import exclusao_api
+        res = exclusao_api.registrar_recusas(nome_arquivo, vidas)
+        if res and res["recusados"]:
+            return (f"\n\n🔁 {len(res['recusados'])} vida(s) recusada(s) ficaram registradas no lote `{res['lote']}` e "
+                    f"voltam a poder ser tratadas: " + ", ".join(r["codigo"] for r in res["recusados"]) + ".")
+    except Exception as e:
+        print(f"[{linha['id']}] erro registrando recusas da exclusao: {e}")
+    return ""
+
+
 def processar_linha(cur, linha: dict) -> None:
     codigo_contrato = linha["codigo_contrato"]
     confirmacao = linha["confirmacao_upload"]
@@ -201,11 +221,12 @@ def processar_linha(cur, linha: dict) -> None:
                    WHERE id = %s""",
                 (status_raw, linha["id"]),
             )
+            extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, movimento.get("controlCode"), None)
             notificar(
                 solicitante_upn,
                 f"✅ A {tipo} do {identificador} já processou no portal Hapvida — status: "
                 f"**{status_legivel}**. Se precisar do relatório detalhado de críticas, me avisa "
-                f"que eu busco." + proxima_onda,
+                f"que eu busco." + extra_recusas + proxima_onda,
             )
         else:
             cur.execute(
@@ -259,6 +280,7 @@ def processar_linha(cur, linha: dict) -> None:
             (status_raw, linha["id"]),
         )
 
+        extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, control_code, vidas)
         texto = (
             f"📋 Resultado final da {tipo} do {identificador}, 12h depois do envio: "
             f"**{status_legivel}**.\n\n"
@@ -267,7 +289,7 @@ def processar_linha(cur, linha: dict) -> None:
             texto += "Nenhuma vida com crítica ou cancelamento — tudo processou certinho. ✅" + proxima_onda
             notificar(solicitante_upn, texto)
         else:
-            texto += f"⚠️ {len(vidas)} vida(s) com crítica ou cancelamento — relatório completo no anexo."
+            texto += f"⚠️ {len(vidas)} vida(s) com crítica ou cancelamento — relatório completo no anexo." + extra_recusas
             enviado = notificar_com_relatorio(codigo_contrato, control_code, vidas, solicitante_upn, texto)
             if not enviado:
                 # #156 - fallback: se o relatorio XLSX falhar por qualquer motivo, nao deixa o

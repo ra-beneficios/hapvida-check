@@ -132,3 +132,11 @@ def enviar(lote: str, onda: str, hash_txt: str, solicitante_upn: str) -> dict:
     if protocolo or resultado.get("status") == 200:
         servico.registrar_envio(lote, envio, pastas)
     return {**envio, "upload": {k: v for k, v in resultado.items() if k != "body"}}
+
+
+def registrar_recusas(nome_arquivo: str, vidas_criticadas: list[dict]) -> dict | None:
+    """Chamado pelo verificar_acompanhamentos quando um TXT de exclusao termina de processar: grava no lote quais
+    vidas a Hapvida recusou (pela linha 701 do nosso arquivo). Best-effort - quem chama trata excecao."""
+    recusas = [{"sequencial": v.get("sequencial"), "mensagens": v.get("mensagens") or []}
+               for v in vidas_criticadas if v.get("status") not in ("Processed", "Processing")]
+    return servico.marcar_recusados(nome_arquivo, recusas, _pastas())
