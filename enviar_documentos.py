@@ -28,7 +28,7 @@ from playwright.sync_api import sync_playwright
 
 from censo_saude import criar_sessao_empresa, login_saude
 from documentos_saude import (
-    baixar_boleto_pdf, checar_nota_fiscal, checar_relatorio_analitico, relatorio_coparticipacao_pdf,
+    baixar_boleto_pdf, checar_nota_fiscal, checar_relatorio_analitico, relatorio_coparticipacao, relatorio_coparticipacao_pdf,
 )
 
 SENDER = "noreply@ra-beneficios.com.br"
@@ -60,8 +60,9 @@ _TIPO_POR_PREFIXO = [
     ("Boleto_Coparticipação_", "BOLETO_COPARTICIPACAO"),
     ("NotaFiscal_Saúde_", "NFE_SAUDE"),
     ("NotaFiscal_Coparticipação_", "NFE_COPARTICIPACAO"),
-    ("RelatorioAnalitico_FaturaMensal_", "RELATORIO_ANALITICO"),
-    ("Coparticipacao_Analitico_", "COPARTICIPACAO_ANALITICO"),
+    # Padrao NOV26 (Andre, 05/10/2026): o plano entra no nome do relatorio.
+    ("RelatorioAnalitico_FaturaMensal_", "RELATORIO_ANALITICO_SAUDE"),
+    ("Coparticipacao_Analitico_", "RELATORIO_ANALITICO_COPARTICIPACAO"),
 ]
 
 
@@ -373,6 +374,12 @@ def montar_e_enviar(
     faturas = _buscar_faturas_contrato(codigo)
     if not faturas:
         return {"status": "erro", "detalhe": f"Nenhuma fatura encontrada pra {codigo} — nada pra enviar."}
+    # Regra NOV26 (Andre, 05/10/2026): so' o mes da competencia. A busca pega a
+    # mais recente de cada tipo; copart de mes anterior (contrato sem copart no
+    # mes) iria parar na pasta do mes da mensalidade. Fica so' o que vence no
+    # mesmo mes da mensalidade.
+    ref = next((f for f in faturas if f["bill_type"] == "MENSALIDADE PLANO SAUDE"), faturas[0])["vencimento"]
+    faturas = [f for f in faturas if (f["vencimento"].year, f["vencimento"].month) == (ref.year, ref.month)]
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -436,17 +443,20 @@ def montar_e_enviar(
         # BENEFICIARIOS_ATIVOS do banco saiu.
         if fatura["bill_type"] != "MENSALIDADE PLANO SAUDE":
             if fatura.get("person_number") and fatura.get("remittence"):
-                pdf, aviso = relatorio_coparticipacao_pdf(
-                    auth, codigo, billing_number, fatura["person_number"], fatura["remittence"]
-                )
-                if pdf:
-                    nome = f"Coparticipacao_Analitico_{codigo}.pdf"
-                    anexos.append((nome, "application/pdf", pdf))
-                    anexos_meta.append({"nome": nome, "descricao": "Detalhe por beneficiário e procedimento dos valores de coparticipação do período."})
-                if aviso:
-                    avisos.append(aviso)
+                # PDF vai pro cliente; CSV (mesma fatura) e' fonte do XLSX e da
+                # conferencia total x boleto (regra NOV26, Andre 05/10/2026).
+                for formato, ct in (("PDF", "application/pdf"), ("CSV", "text/csv")):
+                    conteudo, aviso = relatorio_coparticipacao(
+                        auth, codigo, billing_number, fatura["person_number"], fatura["remittence"], formato
+                    )
+                    if conteudo:
+                        nome = f"Coparticipacao_Analitico_{codigo}.{formato.lower()}"
+                        anexos.append((nome, ct, conteudo))
+                        anexos_meta.append({"nome": nome, "descricao": "Relatório analítico da coparticipação do mês, por beneficiário e procedimento."})
+                    if aviso:
+                        avisos.append(aviso)
             else:
-                avisos.append(f"Relatório de coparticipação PDF: fatura {billing_number} sem person_number/remittence no banco.")
+                avisos.append(f"Relatório de coparticipação: fatura {billing_number} sem person_number/remittence no banco.")
 
     if not anexos:
         return {"status": "erro", "detalhe": "Nenhum documento disponível pra anexar — nada foi enviado.", "avisos": avisos}
@@ -470,6 +480,10 @@ def montar_e_enviar(
     graph_creds = _get_graph_credenciais(project)
     token = _get_graph_token(graph_creds)
 
+    # Regra NOV26 (Andre, 05/10/2026): CSV nunca vai pro cliente - fica so' na
+    # pasta, como fonte do XLSX e da conferencia de valor.
+    anexos = [a for a in anexos if not a[0].lower().endswith(".csv")]
+    anexos_meta = [m for m in anexos_meta if not m["nome"].lower().endswith(".csv")]
     tamanho_total = sum(len(conteudo) for _, _, conteudo in anexos)
     zipado = tamanho_total > LIMITE_ANEXOS_BYTES
     if zipado:

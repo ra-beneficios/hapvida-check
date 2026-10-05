@@ -110,17 +110,26 @@ def baixar_boleto_pdf(auth: dict, codigo: str, billing_number: str) -> bytes:
 
 
 API_V1 = API_BASE.replace("/api/v3", "/api/v1")
-COPART_PDF = "2"  # file-type do portal: 1=CSV, 2=PDF, 3=TXT
+COPART_FILE_TYPE = {"CSV": "1", "PDF": "2", "TXT": "3"}  # file-type do portal
 
 
 def relatorio_coparticipacao_pdf(auth: dict, codigo: str, billing_number: str,
                                  person_number: str, remittence: str) -> tuple[bytes | None, str | None]:
-    """Analitico da fatura de coparticipacao em PDF - o mesmo do botao
-    "Relatorio de coparticipacao > PDF" no detalhe da fatura (Andre,
-    01/10/2026). A Hapvida gera em fila (pedido de KGBQY em 01/10 12:09 ainda
-    nao estava pronto 30 min depois), entao NAO espera: se ja estiver pronto,
-    baixa; se nunca foi pedido, pede e devolve aviso; a proxima execucao do
-    procedimento mensal pega o arquivo. Devolve (pdf, aviso)."""
+    return relatorio_coparticipacao(auth, codigo, billing_number, person_number, remittence, "PDF")
+
+
+def relatorio_coparticipacao(auth: dict, codigo: str, billing_number: str,
+                             person_number: str, remittence: str, formato: str = "PDF") -> tuple[bytes | None, str | None]:
+    """Analitico da fatura de coparticipacao (PDF ou CSV) - o mesmo do botao
+    "Relatorio de coparticipacao" no detalhe da fatura (Andre, 01/10/2026).
+    E' o relatorio oficial DAQUELA fatura (billing_number) - so' o mes dela,
+    nunca acumulado (regra NOV26). O CSV (05/10/2026) e' a fonte do XLSX e da
+    conferencia de valor contra o boleto.
+    A Hapvida gera em fila (pedido de KGBQY em 01/10 12:09 ainda nao estava
+    pronto 30 min depois), entao NAO espera: se ja estiver pronto, baixa; se
+    nunca foi pedido, pede e devolve aviso; a proxima execucao do procedimento
+    mensal pega o arquivo. Devolve (conteudo, aviso)."""
+    formato = formato.upper()
     criar_sessao_empresa(auth, codigo)
     h = _headers_http(auth)
     params = {"person-number": person_number, "billing-number": billing_number}
@@ -129,32 +138,33 @@ def relatorio_coparticipacao_pdf(auth: dict, codigo: str, billing_number: str,
     for item in itens:
         # Nome real (01/10/2026): EMPRESA_FM_X4ZAT_REMESSA_6365922_PDF.ZIP - um zip com o .PDF dentro.
         nome = (item.get("fileName") or "").upper()
-        if ("_PDF." in nome or nome.endswith(".PDF")) and item.get("billingExtractId"):
+        if (f"_{formato}." in nome or nome.endswith(f".{formato}")) and item.get("billingExtractId"):
             r = _get_com_retry(f"{API_V1}/billings/coparticipation", h, {
                 "person-number": person_number, "billing-extract-id": item["billingExtractId"],
                 "file-name": item["fileName"],
             })
             link = r.json().get("content") if r.status_code == 200 else None
             if not link:
-                return None, f"Relatório de coparticipação PDF pronto mas sem link de download ({r.status_code})."
+                return None, f"Relatório de coparticipação {formato} pronto mas sem link de download ({r.status_code})."
             d = httpx.get(link, timeout=120)
             d.raise_for_status()
             if d.content[:2] != b"PK":
                 return d.content, None
             with zipfile.ZipFile(io.BytesIO(d.content)) as zf:
-                pdfs = [n for n in zf.namelist() if n.lower().endswith(".pdf")]
-                if not pdfs:
-                    return None, f"Relatório de coparticipação: zip {item['fileName']} sem PDF dentro."
-                return zf.read(pdfs[0]), None
-    if any(i.get("isSolicited") and str(i.get("fileType", "")).upper() == "PDF" for i in itens):
-        return None, "Relatório de coparticipação PDF já pedido à Hapvida, ainda em geração."
+                dentro = [n for n in zf.namelist() if n.lower().endswith(f".{formato.lower()}")]
+                if not dentro:
+                    return None, f"Relatório de coparticipação: zip {item['fileName']} sem {formato} dentro."
+                return zf.read(dentro[0]), None
+    codigo_tipo = COPART_FILE_TYPE[formato]
+    if any(i.get("isSolicited") and str(i.get("fileType", "")).upper() in (formato, codigo_tipo) for i in itens):
+        return None, f"Relatório de coparticipação {formato} já pedido à Hapvida, ainda em geração."
     r = httpx.post(f"{API_V1}/billings/coparticipation/generate-individual-report", headers=h, timeout=30, json={
         "person-number": person_number, "remittence-code": remittence,
-        "file-type": COPART_PDF, "billing-number": billing_number,
+        "file-type": codigo_tipo, "billing-number": billing_number,
     })
     if r.status_code >= 300:
-        return None, f"Pedido do relatório de coparticipação PDF recusado ({r.status_code}: {r.text[:200]})."
-    return None, "Relatório de coparticipação PDF pedido à Hapvida agora; sai na próxima execução."
+        return None, f"Pedido do relatório de coparticipação {formato} recusado ({r.status_code}: {r.text[:200]})."
+    return None, f"Relatório de coparticipação {formato} pedido à Hapvida agora; sai na próxima execução."
 
 
 def _db():

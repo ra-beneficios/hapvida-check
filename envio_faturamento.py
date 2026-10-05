@@ -41,6 +41,7 @@ import psycopg2
 
 import enviar_documentos as ed
 import faturamento_mensal as fm
+import padrao_faturamento as pf
 
 BASE = ed.SHAREPOINT_FATURAS_BASE
 STATUS_DIR = os.path.join(BASE, "_status")
@@ -52,22 +53,20 @@ MODALIDADE = {"SAUDE": "Saúde", "ODONTO_PREMIUM": "Odonto Premium"}
 LIMITE_ENVIO_BYTES = int(3.3 * 1024 * 1024)  # zip de 3,06MB passou em 30/09; acima disso bloqueia
 LISTA_ATIVOS_IDADE_MAX_DIAS = 10
 
+# Padrao NOV26 (Andre, 05/10/2026): so' estes arquivos vao pro cliente - lista
+# fechada em padrao_faturamento / PROCEDIMENTO_MENSAL.md "Padrao de arquivos".
 DESCR = [
     ("BOLETO_COPARTICIPACAO", "Boleto de cobrança — coparticipação"),
     ("BOLETO_SAUDE", "Boleto de cobrança — mensalidade saúde"),
-    ("BOLETO", "Boleto de cobrança"),
+    ("BOLETO_ODONTO", "Boleto de cobrança — mensalidade odonto"),
     ("NFE_COPARTICIPACAO", "Nota fiscal eletrônica de serviços — coparticipação"),
     ("NFE_SAUDE", "Nota fiscal eletrônica de serviços — mensalidade saúde"),
-    ("NFE", "Nota fiscal eletrônica de serviços"),
+    ("NFE_ODONTO", "Nota fiscal eletrônica de serviços — mensalidade odonto"),
+    ("RELATORIO_ANALITICO_COPARTICIPACAO", "Relatório analítico da coparticipação do mês, por beneficiário e procedimento"),
     ("RELATORIO_ANALITICO", "Relatório analítico da fatura mensal"),
-    ("COPARTICIPACAO_ANALITICO", "Detalhe por beneficiário e procedimento dos valores de coparticipação do período"),
     ("LISTA_ATIVOS", "Lista de beneficiários ativos do contrato"),
 ]
-# Andre, 01/10/2026: lista de ativos que vai pro cliente e' so' a oficial da
-# operadora (LISTA_ATIVOS). BENEFICIARIOS_ATIVOS (gerada do nosso banco) nao
-# e' mais baixada; arquivo antigo que ainda esteja na pasta e' ignorado.
 IGNORAR = ("BENEFICIARIOS_ATIVOS",)
-ANEXAVEIS = (".pdf", ".xlsx")
 _RE_FALTA_NF = re.compile(r": (NFE_|NF( \(|$))")
 
 
@@ -99,10 +98,12 @@ def status_legado_linhas(comp):
                 continue
             if (venc.month, venc.year) != (mes, ano) or not (l.get("NumeroDocumento") or "").strip():
                 continue
-            r = res.setdefault(l["Codigo"].strip(), {"BOLETO": set(), "NFE": set(), "venc": venc})
+            r = res.setdefault(l["Codigo"].strip(), {"BOLETO": set(), "NFE": set(), "venc": venc, "valores": set()})
             tipo = (l.get("TipoDocumento") or "").strip().upper()
             if tipo in r:
                 r[tipo].add(l["NumeroDocumento"].strip())
+            if tipo == "BOLETO" and pf._float_br(l.get("Valor") or "") is not None:
+                r["valores"].add(pf._float_br(l["Valor"]))
             r["venc"] = min(r["venc"], venc)
     return res
 
@@ -198,9 +199,10 @@ def copart_do_mes(caminho, comp):
     return any(int(m) == mes and int(a) == ano for m, a in venc)
 
 
-def lista_ativos_fallback(cod, comp):
+def lista_ativos_fallback(cod, comp, plano):
     """Legado: o job semanal do Cowork pode ter gravado a lista na pasta do mes
-    anterior (feito a mao em 30/09 pro OUT26). Copia se for recente."""
+    anterior (feito a mao em 30/09 pro OUT26). Copia o CSV se for recente, com o
+    nome do padrao; XLSX e PDF saem dele (fm.gerar_xlsx_pasta / gerar_pdf_listas)."""
     ant = fm.pasta_contrato(cod, fm.competencia_anterior(comp))
     for n in fm.arquivos(ant):
         if n.upper().startswith("LISTA_ATIVOS") and n.lower().endswith(".csv"):
@@ -208,42 +210,35 @@ def lista_ativos_fallback(cod, comp):
             if (time.time() - os.path.getmtime(orig)) / 86400 <= LISTA_ATIVOS_IDADE_MAX_DIAS:
                 destino_dir = fm.pasta_contrato(cod, comp)
                 os.makedirs(destino_dir, exist_ok=True)
-                shutil.copy2(orig, os.path.join(destino_dir, f"LISTA_ATIVOS_{cod}_{comp}.csv"))
+                shutil.copy2(orig, os.path.join(destino_dir, pf.nome("LISTA_ATIVOS", plano, cod, comp, "csv")))
                 return True
     return False
 
 
 def checar_grupo(conn, g, comp, st):
+    """Padrao NOV26: anexa SO' os arquivos da lista fechada (pf.esperados) e
+    bloqueia o grupo se faltar algum, se o relatorio for de outro mes ou se o
+    total do relatorio nao bater com o boleto da competencia."""
     anexos, meta, faltas, venc = [], [], [], None
+    mes, ano = fm.competencia_para_mes(comp)
     for c in g["codigos"]:
         cod, modal = c["codigo"], MODALIDADE[c["modalidade"]]
+        plano = pf.PLANO_DA_MODALIDADE[c["modalidade"]]
         pasta = fm.pasta_contrato(cod, comp)
         nomes = [n for n in fm.arquivos(pasta) if not n.upper().startswith(IGNORAR)]
         if c["portal"] == "legado" and nomes and not any(n.upper().startswith("LISTA_ATIVOS") for n in nomes):
-            if lista_ativos_fallback(cod, comp):
+            if lista_ativos_fallback(cod, comp, plano):
                 log(f"{cod}: lista de ativos copiada do mês anterior")
                 fm.gerar_xlsx_pasta(pasta)
+                fm.gerar_pdf_listas([pasta])
                 nomes = [n for n in fm.arquivos(pasta) if not n.upper().startswith(IGNORAR)]
-        up = [n.upper() for n in nomes]
-        tem = lambda p: any(n.startswith(p) for n in up)
         if not nomes:
             faltas.append(f"{cod}: pasta {comp} vazia")
             continue
-        if not tem("LISTA_ATIVOS"):
-            faltas.append(f"{cod}: lista de ativos")
-        for ext in (".PDF", ".XLSX"):
-            if not any(n.startswith("RELATORIO_ANALITICO") and n.endswith(ext) for n in up):
-                faltas.append(f"{cod}: relatório analítico {ext[1:]}")
         if c["portal"] == "saude":
-            for t in sorted(c["tipos"]):
-                for p in (f"BOLETO_{t}", f"NFE_{t}"):
-                    if not tem(p):
-                        faltas.append(f"{cod}: {p}")
-            if "COPARTICIPACAO" in c["tipos"] and not any(
-                    n.startswith("COPARTICIPACAO_ANALITICO") and n.endswith(".PDF") for n in up):
-                faltas.append(f"{cod}: analítico coparticipação PDF")
+            copart = "COPARTICIPACAO" in c["tipos"]
+            valores = fm.valores_saude(cod, comp)
             with conn.cursor() as cur:
-                mes, ano = fm.competencia_para_mes(comp)
                 cur.execute("""SELECT min(f.vencimento) FROM faturas f JOIN empresa_operadora_codigos e
                                ON e.id = f.empresa_operadora_codigo_id WHERE e.codigo_externo = %s
                                AND f.bill_type = 'MENSALIDADE PLANO SAUDE'
@@ -252,43 +247,25 @@ def checar_grupo(conn, g, comp, st):
                 v = cur.fetchone()[0]
             venc = min(venc, v) if venc and v else (venc or v)
         else:
-            # Legado: NF vem com o numero da nota no nome (sem dizer se e' mensalidade/copart)
-            # -> confere por quantidade contra o status do Cowork.
-            n_bol = sum(n.startswith("BOLETO") for n in up)
-            # conta NF diferente pelo conteudo: a mesma nota com dois nomes (Z8TUR,
-            # 01/10/2026) nao pode passar por "2 de 2".
-            nfs, nfs_outro_mes = fm.nfs_do_mes(pasta, [n for n in nomes if n.upper().startswith("NFE")], comp)
-            n_nfe = len(fm.conteudos_distintos(pasta, nfs))
-            faltas += [f"{cod}: NF de outro mês ({n})" for n in nfs_outro_mes]
             s = st.get(cod)
-            esperado_bol = len(s["BOLETO"]) if s else 1
-            esperado_nfe = max(len(s["NFE"]) if s else 0, esperado_bol)
-            if n_bol < esperado_bol:
-                faltas.append(f"{cod}: boleto ({n_bol}/{esperado_bol})")
-            if n_nfe < esperado_nfe:
-                faltas.append(f"{cod}: NF ({n_nfe}/{esperado_nfe})")
+            copart = plano == "SAUDE" and bool(s) and len(s["BOLETO"]) >= 2
+            valores = s["valores"] if s else set()
             if s and c["modalidade"] == "SAUDE" or (s and venc is None):
                 venc = min(venc, s["venc"]) if venc else s["venc"]
-        for n in nomes:
-            if n.upper().startswith("COPARTICIPACAO_ANALITICO") and n.lower().endswith(".pdf") \
+        faltas += [f"{cod}: {n}" for n in pf.faltando(nomes, cod, comp, plano, copart)]
+        faltas += [f"{cod}: {n}" for n in pf.faltando_fontes(nomes, cod, comp, plano, copart)
+                   if n.startswith("RELATORIO_ANALITICO")]
+        faltas += [f"{cod}: {p}" for p in pf.conferir_valores(pasta, cod, comp, plano, copart, valores)]
+        nfs = [n for n in nomes if n.upper().startswith("NFE_")]
+        faltas += [f"{cod}: NF de outro mês ({n})" for n in fm.nfs_do_mes(pasta, nfs, comp)[1]]
+        for n in pf.anexaveis(nomes, cod, comp, plano, copart):
+            if n.upper().startswith("RELATORIO_ANALITICO_COPARTICIPACAO") and n.lower().endswith(".pdf") \
                     and not copart_do_mes(os.path.join(pasta, n), comp):
-                # Z8TUR 01/10/2026: PDF de SET26 salvo na pasta de OUT26
-                faltas.append(f"{cod}: analítico coparticipação PDF é de outro mês ({n})")
-        for n in nomes:
-            # Andre, 01/10/2026: cliente recebe so' PDF e XLSX - o CSV fica na
-            # pasta como fonte do XLSX; sobra do sync (.sharepoint) tambem fica.
-            if not n.lower().endswith(ANEXAVEIS):
-                continue
-            # copart do banco (CSV/XLSX, ate' OUT26) nao vai mais: so' o PDF oficial.
-            if n.upper().startswith("COPARTICIPACAO_ANALITICO") and not n.lower().endswith(".pdf"):
-                continue
-            d = descricao(n, modal)
-            if d is None:
-                faltas.append(f"{cod}: arquivo inesperado {n}")
+                faltas.append(f"{cod}: relatório de coparticipação PDF é de outro mês ({n})")
                 continue
             with open(os.path.join(pasta, n), "rb") as f:
                 anexos.append((n, ed.mimetypes.guess_type(n)[0] or "application/octet-stream", f.read()))
-            meta.append({"nome": n, "descricao": d})
+            meta.append({"nome": n, "descricao": descricao(n, modal)})
     emails = []
     with conn.cursor() as cur:
         for c in g["codigos"]:

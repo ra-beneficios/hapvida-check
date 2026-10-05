@@ -41,6 +41,7 @@ from playwright.sync_api import sync_playwright
 import boletos_saude
 import censo_saude
 import enviar_documentos
+import padrao_faturamento as pf
 import scraper
 from censo_saude import login_saude
 
@@ -229,7 +230,7 @@ def status_legado(comp: str) -> dict[str, dict]:
                 continue
             if int(m) != mes or 2000 + int(a[-2:]) != ano:
                 continue
-            info = res.setdefault(linha["Codigo"], {"emitido": False, "tipos": set(), "boletos": set()})
+            info = res.setdefault(linha["Codigo"], {"emitido": False, "tipos": set(), "boletos": set(), "valores": set()})
             numero = (linha.get("NumeroDocumento") or "").strip()
             tipo = linha.get("TipoDocumento", "").strip().upper()
             if numero:
@@ -237,31 +238,61 @@ def status_legado(comp: str) -> dict[str, dict]:
                 info["tipos"].add(tipo)
                 if tipo == "BOLETO":
                     info["boletos"].add(numero)
+                    v = pf._float_br(linha.get("Valor") or "")
+                    if v is not None:
+                        info["valores"].add(v)
     return res
 
 
 # ---------------------------------------------------------------- saude
 
-def faltando_saude(codigo: str, tipos: set[str], comp: str) -> list[str]:
-    nomes = arquivos(pasta_contrato(codigo, comp))
-    falta = []
-    for t in sorted(tipos):
-        if not tem(nomes, f"BOLETO_{t}"):
-            falta.append(f"Boleto {t.lower()}")
-        if not tem(nomes, f"NFE_{t}"):
-            falta.append(f"NF {t.lower()}")
-    if "COPARTICIPACAO" in tipos and not tem(nomes, "COPARTICIPACAO_ANALITICO", ".pdf"):
-        falta.append("Analítico coparticipação PDF")
-    for ext in (".pdf", ".csv", ".xlsx"):
-        if not tem(nomes, "RELATORIO_ANALITICO", ext):
-            falta.append(f"Relatório analítico {ext[1:].upper()}")
-    if not tem(nomes, "LISTA_ATIVOS"):
-        falta.append("Lista de ativos")
+def valores_saude(codigo: str, comp: str) -> dict[str, set[float]]:
+    """Valor de cada boleto do contrato na competencia, por plano (SAUDE/COPARTICIPACAO)."""
+    mes, ano = competencia_para_mes(comp)
+    conn = psycopg2.connect(dbname="lifetools")
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT f.bill_type, f.valor FROM faturas f
+                   JOIN empresa_operadora_codigos eoc ON eoc.id = f.empresa_operadora_codigo_id
+                   WHERE eoc.codigo_externo = %s
+                     AND extract(month FROM f.vencimento) = %s AND extract(year FROM f.vencimento) = %s""",
+                (codigo, mes, ano))
+            out: dict[str, set[float]] = {}
+            for bill_type, valor in cur.fetchall():
+                plano = "SAUDE" if bill_type == "MENSALIDADE PLANO SAUDE" else "COPARTICIPACAO"
+                out.setdefault(plano, set()).add(float(valor))
+            return out
+    finally:
+        conn.close()
+
+
+def faltando_saude(codigo: str, tipos: set[str], comp: str, conferir: bool = False) -> list[str]:
+    """Padrao NOV26 (padrao_faturamento): arquivos de envio + CSV oficiais (fonte
+    do XLSX/PDF e da conferencia). Com conferir=True, inclui total x boleto."""
+    pasta = pasta_contrato(codigo, comp)
+    nomes = arquivos(pasta)
+    copart = "COPARTICIPACAO" in tipos
+    falta = pf.faltando(nomes, codigo, comp, "SAUDE", copart)
+    falta += [n for n in pf.faltando_fontes(nomes, codigo, comp, "SAUDE", copart) if n not in falta]
+    if conferir:
+        falta += pf.conferir_valores(pasta, codigo, comp, "SAUDE", copart, valores_saude(codigo, comp))
     return falta
 
 
 def _so_documentos_portal(falta: list[str]) -> bool:
-    return any(not (f.startswith("Lista") or f.endswith("XLSX")) for f in falta)
+    """Falta algo que so' o portal da' (boleto, NF, relatorio PDF/CSV)? XLSX e
+    PDF da lista sao gerados aqui; a lista em si vem do salvar_listas_ativos."""
+    return any(f.startswith(("BOLETO_", "NFE_", "RELATORIO_ANALITICO_")) and not f.lower().endswith(".xlsx")
+               for f in falta)
+
+
+def _lista_csv(codigo: str, comp: str) -> str:
+    return pf.nome("LISTA_ATIVOS", "SAUDE", codigo, comp, "csv")
+
+
+def tem_lista(codigo: str, comp: str) -> bool:
+    return _lista_csv(codigo, comp).upper() in {n.upper() for n in arquivos(pasta_contrato(codigo, comp))}
 
 
 def baixar_documentos_saude(codigos: dict[str, set[str]], comp: str, modo: str, creds: dict) -> dict[str, list[str]]:
@@ -313,7 +344,7 @@ ESTADO_LISTAS = os.path.join(BASE, "_status", "LISTAS_ATIVOS_ESTADO.json")
 def salvar_listas_ativos(codigos: dict[str, set[str]], comp: str, modo: str, creds: dict) -> list[str]:
     """Lista de ativos OFICIAL do portal (relatorio Full de beneficiarios da
     mae, mesmo arquivo do script 160), quebrada por contrato em
-    LISTA_ATIVOS_{codigo}_{comp}.csv. So' grava arquivo; NAO mexe no banco
+    LISTA_ATIVOS_SAUDE_{codigo}_{comp}.csv (fonte do XLSX e do PDF). So' grava arquivo; NAO mexe no banco
     de vidas (isso continua sendo o 160, manual).
 
     Assincrono desde 01/10/2026: a Hapvida chega a levar mais de 40 min pra
@@ -325,9 +356,7 @@ def salvar_listas_ativos(codigos: dict[str, set[str]], comp: str, modo: str, cre
     em ESTADO_LISTAS e a proxima execucao coleta. O CSV traz o codigo de cada
     linha (coluna EMPRESA), entao o arquivo se identifica sozinho: so' grava
     linha de contrato que ainda falta."""
-    alvo = set(codigos) if modo == "completo" else {
-        c for c in codigos if not tem(arquivos(pasta_contrato(c, comp)), "LISTA_ATIVOS")
-    }
+    alvo = set(codigos) if modo == "completo" else {c for c in codigos if not tem_lista(c, comp)}
     if not alvo:
         return []
     gravados: set[str] = set()
@@ -336,7 +365,7 @@ def salvar_listas_ativos(codigos: dict[str, set[str]], comp: str, modo: str, cre
         # completo regrava todas; faltantes so' as que nao estao na pasta
         if modo == "completo":
             return alvo - gravados
-        return {c for c in alvo if not tem(arquivos(pasta_contrato(c, comp)), "LISTA_ATIVOS")}
+        return {c for c in alvo if not tem_lista(c, comp)}
 
     mae_de = _maes_dos_codigos(alvo)
     estado = _ler_estado_listas()
@@ -433,7 +462,7 @@ def _gravar_listas(bruto: bytes, alvo: set[str], comp: str) -> set[str]:
     for codigo, linhas in por_codigo.items():
         pasta = pasta_contrato(codigo, comp)
         os.makedirs(pasta, exist_ok=True)
-        with open(os.path.join(pasta, f"LISTA_ATIVOS_{codigo}_{comp}.csv"), "w", encoding="utf-8", newline="") as f:
+        with open(os.path.join(pasta, _lista_csv(codigo, comp)), "w", encoding="utf-8", newline="") as f:
             w = csv.writer(f, delimiter=";", quotechar='"', quoting=csv.QUOTE_ALL)
             w.writerow(cab)
             w.writerows(linhas)
@@ -464,18 +493,26 @@ def _num(v: str):
 
 
 def gerar_xlsx_relatorios(comp: str) -> int:
-    """Todo CSV de relatorio da pasta da competencia (Saude e Legado) ganha
-    um XLSX ao lado (Andre, 01/10/2026). O portal nao oferece XLSX: o
-    analitico so' sai em PDF/CSV/TXT (XLSX/XLS da 500, testado 28/09/2026) e
-    a lista de ativos so' em CSV."""
+    """Derivados de todo CSV oficial da pasta da competencia (Saude e Legado):
+    XLSX de relatorio/lista (Andre, 01/10/2026) e PDF da lista de ativos
+    (regra NOV26, 05/10/2026). O portal nao oferece XLSX: o analitico so' sai
+    em PDF/CSV/TXT (XLSX/XLS da 500, testado 28/09/2026) e a lista de ativos
+    so' em CSV/tela."""
     gerados = 0
+    pastas = []
     for empresa in os.listdir(BASE):
         dir_emp = os.path.join(BASE, empresa)
         if empresa.startswith("_") or not os.path.isdir(dir_emp):
             continue
-        for codigo in os.listdir(dir_emp):
-            gerados += gerar_xlsx_pasta(os.path.join(dir_emp, codigo, comp))
+        pastas += [os.path.join(dir_emp, codigo, comp) for codigo in os.listdir(dir_emp)]
+    for pasta in pastas:
+        gerados += gerar_xlsx_pasta(pasta)
+    gerados += gerar_pdf_listas(pastas)
     return gerados
+
+
+def _desatualizado(origem: str, destino: str) -> bool:
+    return not os.path.exists(destino) or os.path.getmtime(destino) < os.path.getmtime(origem)
 
 
 def gerar_xlsx_pasta(pasta: str) -> int:
@@ -486,10 +523,12 @@ def gerar_xlsx_pasta(pasta: str) -> int:
             continue
         destino = os.path.join(pasta, nome[:-4] + ".xlsx")
         origem = os.path.join(pasta, nome)
-        if os.path.exists(destino) and os.path.getmtime(destino) >= os.path.getmtime(origem):
+        if not _desatualizado(origem, destino):
             continue
         try:
-            if up.startswith("RELATORIO_ANALITICO"):
+            if up.startswith("RELATORIO_ANALITICO_COPARTICIPACAO"):
+                _csv_copart_para_xlsx(origem, destino)
+            elif up.startswith("RELATORIO_ANALITICO"):
                 _csv_para_xlsx(origem, destino)
             else:
                 _csv_generico_para_xlsx(origem, destino)
@@ -497,6 +536,151 @@ def gerar_xlsx_pasta(pasta: str) -> int:
         except Exception as e:
             log(f"xlsx {nome}: ERRO {e}")
     return gerados
+
+
+def _csv_copart_para_xlsx(origem: str, destino: str) -> None:
+    """Analitico de coparticipacao oficial (CSV da fatura) -> XLSX: cabecalho
+    da Hapvida em cima, valores (colunas VL*) como numero em reais, CPF/senha
+    como texto, linha de total no fim."""
+    with open(origem, "rb") as f:
+        linhas = _texto_censo(f.read()).splitlines()
+    i_cab = next((i for i, l in enumerate(linhas) if "VL PARTICIPACAO" in l.upper()),
+                 next(i for i, l in enumerate(linhas) if l.count(";") >= 5))
+    cab = [c.strip() for c in linhas[i_cab].split(";")]
+    while cab and not cab[-1]:
+        cab.pop()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Coparticipacao"
+    for l in linhas[:i_cab]:
+        ws.append([ILLEGAL_CHARACTERS_RE.sub("", l.strip())])
+        ws.cell(ws.max_row, 1).font = openpyxl.styles.Font(bold=True)
+    ws.append([])
+    ws.append(cab)
+    linha_cab = ws.max_row
+    for c in ws[linha_cab]:
+        c.font = openpyxl.styles.Font(bold=True)
+    valor = {i for i, c in enumerate(cab) if c.upper().startswith("VL")}
+    i_part = next((i for i, c in enumerate(cab) if c.upper() == "VL PARTICIPACAO"), None)
+    total, n = 0.0, 0
+    for valores in csv.reader(io.StringIO("\n".join(linhas[i_cab + 1:])), delimiter=";", quotechar='"'):
+        valores = [ILLEGAL_CHARACTERS_RE.sub("", v.strip()) for v in valores[:len(cab)]]
+        if not any(valores):
+            continue
+        linha = []
+        for i, v in enumerate(valores):
+            if i in valor:
+                f = pf._float_br(v)
+                linha.append(f if f is not None else v)
+            elif cab[i].upper() == "QUANTIDADE" and v.isdigit():
+                linha.append(int(v))
+            else:
+                linha.append(v)
+        ws.append(linha)
+        n += 1
+        for i in valor:
+            ws.cell(ws.max_row, i + 1).number_format = "#,##0.00"
+        if i_part is not None and isinstance(linha[i_part] if i_part < len(linha) else None, float):
+            total += linha[i_part]
+    if i_part is not None:
+        ws.append([])
+        ws.append(["TOTAL"] + [None] * (i_part - 1) + [round(total, 2)])
+        ws.cell(ws.max_row, 1).font = openpyxl.styles.Font(bold=True)
+        ws.cell(ws.max_row, i_part + 1).number_format = "#,##0.00"
+    ws.freeze_panes = ws.cell(linha_cab + 1, 1)
+    if n:
+        ws.auto_filter.ref = f"A{linha_cab}:{openpyxl.utils.get_column_letter(len(cab))}{linha_cab + n}"
+    wb.save(destino)
+
+
+# Colunas da lista de ativos que vao pro PDF (nome no PDF -> nomes possiveis no CSV
+# do portal novo, 45 colunas, ou do Legado, 12 colunas). O XLSX leva todas.
+_COLUNAS_LISTA_PDF = [
+    ("Código", ("CODIGO USUARIO",)),
+    ("Matrícula", ("MATRICULA",)),
+    ("Beneficiário", ("USUARIO",)),
+    ("CPF", ("CPF_DEPENDENTE", "CPF")),
+    ("Tipo", ("TIPO USUARIO", "TIPO_USUARIO")),
+    ("Parentesco", ("GRAU PARENTESCO",)),
+    ("Plano", ("PLANO",)),
+    ("Nascimento", ("DATA_NASCIMENTO",)),
+    ("Admissão", ("DT_ADMISSAO",)),
+]
+
+
+def gerar_pdf_listas(pastas: list[str]) -> int:
+    """LISTA_ATIVOS_{PLANO}_{COD}_{MES}.pdf a partir do CSV oficial do mes
+    (Andre, 05/10/2026: lista de ativos vai em XLSX e PDF). So' gera quando o
+    PDF nao existe ou e' mais velho que o CSV."""
+    pendentes = []
+    for pasta in pastas:
+        for n in arquivos(pasta):
+            up = n.upper()
+            if up.startswith(("LISTA_ATIVOS_SAUDE_", "LISTA_ATIVOS_ODONTO_")) and up.endswith(".CSV"):
+                origem, destino = os.path.join(pasta, n), os.path.join(pasta, n[:-4] + ".pdf")
+                if _desatualizado(origem, destino):
+                    pendentes.append((origem, destino))
+    if not pendentes:
+        return 0
+    gerados = 0
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        try:
+            for origem, destino in pendentes:
+                try:
+                    page.set_content(_html_lista(origem))
+                    page.pdf(path=destino, format="A4", landscape=True, print_background=True,
+                             margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"},
+                             display_header_footer=True, header_template="<span></span>",
+                             footer_template="<div style='font-size:8px;width:100%;text-align:center;color:#666'>"
+                                             "Página <span class='pageNumber'></span> de <span class='totalPages'></span></div>")
+                    gerados += 1
+                except Exception as e:
+                    log(f"pdf lista {os.path.basename(origem)}: ERRO {e}")
+        finally:
+            browser.close()
+    return gerados
+
+
+def _html_lista(caminho_csv: str) -> str:
+    import html as _h
+    with open(caminho_csv, "rb") as f:
+        texto = _texto_censo(f.read())
+    delim = ";" if texto.splitlines()[0].count(";") >= texto.splitlines()[0].count(",") else ","
+    linhas = list(csv.reader(io.StringIO(texto), delimiter=delim, quotechar='"'))
+    cab = [c.strip().upper() for c in linhas[0]]
+    cols = []
+    for rotulo, candidatos in _COLUNAS_LISTA_PDF:
+        i = next((cab.index(c) for c in candidatos if c in cab), None)
+        if i is not None:
+            cols.append((rotulo, i))
+    dados = [l for l in linhas[1:] if any(v.strip() for v in l)]
+    # coluna sem nenhum valor (ex.: nascimento/admissao no Legado) nao entra no PDF
+    cols = [(r, i) for r, i in cols if any(i < len(l) and l[i].strip() for l in dados)]
+    i_tipo = next((i for r, i in cols if r == "Tipo"), None)
+    titulares = sum(1 for l in dados if i_tipo is not None and i_tipo < len(l) and "TITULAR" in l[i_tipo].upper())
+    nome_arq = os.path.basename(caminho_csv)[:-4]
+    partes = nome_arq.split("_")  # LISTA_ATIVOS_{PLANO}_{COD}_{MES}
+    plano, codigo, comp = partes[2], partes[3], partes[4]
+    empresa = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(caminho_csv))))
+    th = "".join(f"<th>{_h.escape(r)}</th>" for r, _ in cols)
+    corpo = "".join("<tr>" + "".join(f"<td>{_h.escape(l[i].strip() if i < len(l) else '')}</td>" for _, i in cols) + "</tr>"
+                    for l in dados)
+    resumo = f"{len(dados)} beneficiários" + (f" ({titulares} titulares, {len(dados) - titulares} dependentes)" if i_tipo is not None else "")
+    return f"""<html><head><meta charset="utf-8"><style>
+      body{{font-family:Arial,sans-serif;font-size:8px;color:#222}}
+      h1{{font-size:14px;margin:0 0 2px}} p{{margin:0 0 8px;color:#555}}
+      table{{border-collapse:collapse;width:100%}} th{{background:#1f3b5c;color:#fff;text-align:left;padding:3px 4px}}
+      td{{border-bottom:1px solid #ddd;padding:1px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px}}
+      tr:nth-child(even) td{{background:#f6f6f6}}
+      thead{{display:table-header-group}}
+    </style></head><body>
+      <h1>Lista de beneficiários ativos — {_h.escape(empresa)}</h1>
+      <p>Contrato {codigo} · {"Saúde" if plano == "SAUDE" else "Odonto"} · competência {comp} · {resumo} ·
+         fonte: relatório oficial da operadora</p>
+      <table><thead><tr>{th}</tr></thead><tbody>{corpo}</tbody></table>
+    </body></html>"""
 
 
 _RE_DECIMAL = re.compile(r"^-?\d+\.\d{1,2}$")
@@ -564,53 +748,63 @@ def codigos_ja_enviados(comp: str) -> set[str]:
     return {c for r in registros if r.get("status") in ("enviado", "reenviado") for c in r["codigos"].split("+")}
 
 
+def modalidades(codigos: set[str]) -> dict[str, str]:
+    conn = psycopg2.connect(dbname="lifetools")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT codigo_externo, modalidade FROM empresa_operadora_codigos "
+                        "WHERE operadora_id = 1 AND codigo_externo = ANY(%s)", (list(codigos),))
+            return dict(cur.fetchall())
+    finally:
+        conn.close()
+
+
 def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> dict:
+    """Padrao NOV26 (padrao_faturamento): cobra os nomes da lista fechada nos
+    dois portais, confere total do relatorio x boleto do mes e aponta arquivo
+    fora do padrao (que nao vai pro cliente)."""
     status_cw = status_legado(comp)
     anterior = competencia_anterior(comp)
     enviados = codigos_ja_enviados(comp)
+    mods = modalidades(set(legado))
     linhas = []
     for codigo, tipos in sorted(saude.items()):
+        pasta = pasta_contrato(codigo, comp)
         if codigo in enviados:
-            linhas.append({"grupo": "Saúde (Code)", "codigo": codigo, "pasta": pasta_contrato(codigo, comp), "falta": [], "obs": "já enviado"})
+            linhas.append({"grupo": "Saúde (Code)", "codigo": codigo, "pasta": pasta, "falta": [], "obs": "já enviado"})
             continue
-        falta = faltando_saude(codigo, tipos, comp)
-        linhas.append({"grupo": "Saúde (Code)", "codigo": codigo, "pasta": pasta_contrato(codigo, comp), "falta": falta, "obs": ""})
+        falta = faltando_saude(codigo, tipos, comp, conferir=True)
+        fora = pf.fora_do_padrao(arquivos(pasta))
+        obs = f"fora do padrão (não vai pro cliente): {', '.join(fora)}" if fora else ""
+        linhas.append({"grupo": "Saúde (Code)", "codigo": codigo, "pasta": pasta, "falta": falta, "obs": obs})
     for codigo, empresa in sorted(legado.items()):
         if codigo in saude:
             continue
-        if codigo in enviados:
-            linhas.append({"grupo": "Legado (Cowork)", "codigo": codigo, "pasta": pasta_contrato(codigo, comp, empresa), "falta": [], "obs": "já enviado"})
-            continue
         pasta = pasta_contrato(codigo, comp, empresa)
+        if codigo in enviados:
+            linhas.append({"grupo": "Legado (Cowork)", "codigo": codigo, "pasta": pasta, "falta": [], "obs": "já enviado"})
+            continue
         nomes = arquivos(pasta)
-        falta = []
         st = status_cw.get(codigo)
-        # Conta como o envio: 1 boleto e 1 NF por boleto emitido no status do
-        # Cowork (Z8TUR/ERQ43/ICBJY tem copart + mensalidade = 2 de cada).
-        esperado = max(len(st["boletos"]) if st else 0, 1)
-        n_bol = sum(_normaliza(n).startswith("BOLETO") for n in nomes)
-        nfs, nfs_outro_mes = nfs_do_mes(pasta, [n for n in nomes if _normaliza(n).startswith("NFE")], comp)
-        n_nfe = len(conteudos_distintos(pasta, nfs))
-        if n_bol < esperado:
-            falta.append("Boleto" if esperado == 1 else f"Boleto ({n_bol}/{esperado})")
-        if n_nfe < esperado:
-            falta.append("NF" if esperado == 1 else f"NF ({n_nfe}/{esperado})")
-        falta += [f"NF de outro mês: {n}" for n in nfs_outro_mes]
-        for ext in (".pdf", ".csv", ".xlsx"):
-            if not tem(nomes, "RELATORIO_ANALITICO", ext):
-                falta.append(f"Relatório analítico {ext[1:].upper()}")
+        plano = pf.PLANO_DA_MODALIDADE.get(mods.get(codigo), "ODONTO")
+        # Saude do Legado (Z8TUR, LH ERQ43/ICBJY): 2 boletos no mes = mensalidade + copart.
+        copart = plano == "SAUDE" and bool(st) and len(st["boletos"]) >= 2
+        falta = pf.faltando(nomes, codigo, comp, plano, copart)
+        falta += [n for n in pf.faltando_fontes(nomes, codigo, comp, plano, copart) if not n.startswith("LISTA_ATIVOS")]
         obs = []
-        if not tem(nomes, "LISTA_ATIVOS"):
-            if tem(arquivos(pasta_contrato(codigo, anterior, empresa)), "LISTA_ATIVOS"):
-                obs.append(f"lista de ativos só em {anterior} (job semanal do Cowork grava no mês corrente)")
-            else:
-                falta.append("Lista de ativos")
-        if not any(f.startswith("NF") for f in falta):
-            obs += enviar_documentos.checar_pares_boleto_nfe(nomes)
-        elif st and "NFE" not in st["tipos"]:
+        if any(f.startswith("LISTA_ATIVOS") for f in falta) and tem(arquivos(pasta_contrato(codigo, anterior, empresa)), "LISTA_ATIVOS"):
+            falta = [f for f in falta if not f.startswith("LISTA_ATIVOS")]
+            obs.append(f"lista de ativos só em {anterior} (o envio copia se tiver até 10 dias)")
+        nfs, nfs_outro_mes = nfs_do_mes(pasta, [n for n in nomes if _normaliza(n).startswith("NFE")], comp)
+        falta += [f"NF de outro mês: {n}" for n in nfs_outro_mes]
+        falta += pf.conferir_valores(pasta, codigo, comp, plano, copart, st["valores"] if st else set())
+        if any(f.startswith("NFE_") for f in falta) and st and "NFE" not in st["tipos"]:
             obs.append("NF ainda não emitida pela Hapvida (status do Cowork só tem boleto)")
         if falta and st and not st["emitido"]:
             obs.append("Hapvida ainda não emitiu nº de boleto/NF (status do Cowork)")
+        fora = pf.fora_do_padrao(nomes)
+        if fora:
+            obs.append(f"fora do padrão (não vai pro cliente): {', '.join(fora)}")
         linhas.append({"grupo": "Legado (Cowork)", "codigo": codigo, "pasta": pasta, "falta": falta, "obs": "; ".join(obs)})
     return {"competencia": comp, "gerado_em": datetime.now().isoformat(timespec="seconds"), "contratos": linhas}
 
@@ -625,8 +819,10 @@ def escrever_relatorio(aud: dict, modo: str, avisos: dict, erros_lista: list[str
         f"Gerado em {aud['gerado_em']} (modo `{modo}`). "
         f"{len(completos)} de {len(aud['contratos'])} contratos completos.",
         "",
-        "Esperado por contrato: boleto + NF (saúde e, se houver, coparticipação), relatório analítico "
-        "PDF/CSV/XLSX, lista de ativos. XLSX é gerado aqui a partir do CSV oficial (o portal não oferece XLSX).",
+        "Padrão NOV26 (PROCEDIMENTO_MENSAL.md, seção \"Padrão de arquivos\"): por plano (Saúde, Coparticipação "
+        "se houver, Odonto) boleto e NF em PDF, relatório analítico PDF+XLSX e lista de ativos XLSX+PDF, todos "
+        "`{TIPO}_{PLANO}_{CÓDIGO}_{MÊS}`. O CSV oficial fica na pasta como fonte (XLSX/PDF gerados aqui) e o total "
+        "do relatório tem que bater com o boleto do mês. CSV nunca vai ao cliente.",
         "",
         "## Faltando",
         "",
@@ -673,8 +869,10 @@ def escrever_handoff_cowork(aud: dict) -> str | None:
     corpo += [f"  - {l['codigo']}: {', '.join(l['falta'])}" + (f" ({l['obs']})" if l["obs"] else "") for l in faltando]
     corpo += [
         "",
-        "PEDIDO: baixar o que falta na próxima execução do fluxo mensal (mesma convenção de nome/pasta). "
-        "Relatório analítico XLSX não precisa — o Code gera a partir do CSV.",
+        "PEDIDO: baixar o que falta na próxima execução do fluxo mensal, com os nomes do padrão NOV26 "
+        "(operadoras/hapvida/PROCEDIMENTO_MENSAL.md, seção \"Padrão de arquivos\"). Deixe sempre o CSV oficial "
+        "do relatório analítico (o Code confere o total com o boleto e gera o XLSX); se deixar o CSV da lista de "
+        "ativos, o Code gera XLSX e PDF. Relatório com total diferente do boleto do mês = arquivo errado.",
         "ENTREGAR EM: pasta de faturas de sempre (sem resposta em _handoff/saida/ necessária)",
         "PRAZO/URGÊNCIA: normal",
     ]
