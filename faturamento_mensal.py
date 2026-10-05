@@ -919,7 +919,8 @@ def atualizar_faturas(creds: dict) -> list[str]:
 
 def main() -> None:
     args = dict(a.lstrip("-").split("=", 1) for a in sys.argv[1:] if "=" in a)
-    modo = args.get("modo", "faltantes")
+    # --modo obrigatorio (05/10/2026: um '--help' rodou o procedimento de faltantes sem querer).
+    modo = args.get("modo")
     if modo not in ("completo", "faltantes"):
         sys.exit("uso: faturamento_mensal.py --modo=completo|faltantes [--competencia=OUT26]")
     comp = args.get("competencia") or competencia_padrao(date.today())
