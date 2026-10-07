@@ -3,6 +3,12 @@ Nota Fiscal/Boleto e Coparticipacao do Grupo Legado, via sessao manual
 (login bloqueado por captcha, #77 - Andre loga e passa a URL autenticada,
 nunca automatizamos o login em si).
 
+ATUALIZADO 07/10/2026: Andre LIBEROU o login automatico no Legado. O fluxo
+mensal agora e' o legado_auto.py (login com credencial do Bitwarden nos 4
+portais, reaproveitando as funcoes daqui). A regra "nunca logar" abaixo vale
+so' pro historico - as funcoes com URL de sessao manual continuam servindo
+pro endpoint /processar-sessao-legado.
+
 Mapeado ao vivo em 01/08 com 2 contratos reais (S7HNK - Odonto Premium,
 Z8TUR - Saude), a partir do hub publico www2.hapvida.com.br/empresas.
 Achados-chave (ver Addendum 10):

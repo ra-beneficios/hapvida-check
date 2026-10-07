@@ -13,7 +13,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py scraper.py censo_legado.py censo_legado_parser.py censo_saude.py copart_saude.py boletos_saude.py documentos_saude.py documentos_legado.py enviar_documentos.py auto_commit.py bulk_import_beneficiarios_oficial.py movimentacao_saude.py secrets_store.py verificar_acompanhamentos.py faturamento_mensal.py padrao_faturamento.py envio_faturamento.py exclusao_api.py ./
+COPY app.py scraper.py censo_legado.py censo_legado_parser.py censo_saude.py copart_saude.py boletos_saude.py documentos_saude.py documentos_legado.py enviar_documentos.py auto_commit.py bulk_import_beneficiarios_oficial.py movimentacao_saude.py secrets_store.py verificar_acompanhamentos.py faturamento_mensal.py padrao_faturamento.py envio_faturamento.py exclusao_api.py legado_auto.py ./
 
 EXPOSE 8000
 

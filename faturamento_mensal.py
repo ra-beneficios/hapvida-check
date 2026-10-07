@@ -10,6 +10,11 @@ Cron no host (00:01):
 Competencia = mes do vencimento: rodando do dia 20 em diante, e' o mes
 seguinte (28/09 -> OUT26); antes do dia 20, o proprio mes (04/10 -> OUT26).
 
+Legado (portal antigo), 07/10/2026: contrato Odonto com credencial no
+Bitwarden (segredo hapvida-legado, copiado pelo sync_bitwarden_legado.py no
+host) e' baixado aqui pelo legado_auto.py; o resto continua com o Cowork
+(handoff). Lista viva em _status/LEGADO_ASSUMIDO_CODE.json.
+
 Nada aqui manda e-mail pra cliente - so' salva arquivo (enviar_email=False)
 e gera o relatorio de auditoria em faturas/_status/ + handoff pro Cowork
 com o que falta do lado Legado.
@@ -41,8 +46,10 @@ from playwright.sync_api import sync_playwright
 import boletos_saude
 import censo_saude
 import enviar_documentos
+import legado_auto
 import padrao_faturamento as pf
 import scraper
+import secrets_store
 from censo_saude import login_saude
 
 BASE = enviar_documentos.SHAREPOINT_FATURAS_BASE
@@ -216,32 +223,44 @@ def status_legado(comp: str) -> dict[str, dict]:
     mes, ano = competencia_para_mes(comp)
     pasta = os.path.join(BASE, "_status")
     arquivos_status = sorted(
-        (os.path.join(pasta, n) for n in os.listdir(pasta) if n.startswith("STATUS_FATURAS_") and n.endswith(".csv")),
+        (os.path.join(pasta, n) for n in os.listdir(pasta)
+         if n.startswith("STATUS_FATURAS_") and not n.startswith("STATUS_FATURAS_CODE_") and n.endswith(".csv")),
         key=os.path.getmtime,
     ) if os.path.isdir(pasta) else []
-    if not arquivos_status:
-        return {}
+    # 07/10/2026: contratos do Legado que o Code assumiu (legado_auto) tem status proprio,
+    # que vale no lugar do Cowork pra esses codigos.
+    do_code = os.path.join(pasta, f"STATUS_FATURAS_CODE_{comp}.csv")
+    fontes = arquivos_status[-1:] + ([do_code] if os.path.exists(do_code) else [])
     res: dict[str, dict] = {}
-    with open(arquivos_status[-1], encoding="utf-8-sig") as f:
-        for linha in csv.DictReader(f, delimiter=";"):
-            try:
-                d, m, a = linha["Vencimento"].split("/")
-            except (ValueError, KeyError, AttributeError):
-                continue
-            if int(m) != mes or 2000 + int(a[-2:]) != ano:
-                continue
-            info = res.setdefault(linha["Codigo"], {"emitido": False, "tipos": set(), "boletos": set(), "valores": set()})
-            numero = (linha.get("NumeroDocumento") or "").strip()
-            tipo = linha.get("TipoDocumento", "").strip().upper()
-            if numero:
-                info["emitido"] = True
-                info["tipos"].add(tipo)
-                if tipo == "BOLETO":
-                    info["boletos"].add(numero)
-                    v = pf._float_br(linha.get("Valor") or "")
-                    if v is not None:
-                        info["valores"].add(v)
+    for fonte in fontes:
+        with open(fonte, encoding="utf-8-sig") as f:
+            linhas = list(csv.DictReader(f, delimiter=";"))
+        if fonte == do_code:
+            for c in {l["Codigo"] for l in linhas}:
+                res.pop(c, None)
+        _acumular_status(res, linhas, mes, ano)
     return res
+
+
+def _acumular_status(res: dict, linhas: list[dict], mes: int, ano: int) -> None:
+    for linha in linhas:
+        try:
+            d, m, a = linha["Vencimento"].split("/")
+        except (ValueError, KeyError, AttributeError):
+            continue
+        if int(m) != mes or 2000 + int(a[-2:]) != ano:
+            continue
+        info = res.setdefault(linha["Codigo"], {"emitido": False, "tipos": set(), "boletos": set(), "valores": set()})
+        numero = (linha.get("NumeroDocumento") or "").strip()
+        tipo = linha.get("TipoDocumento", "").strip().upper()
+        if numero:
+            info["emitido"] = True
+            info["tipos"].add(tipo)
+            if tipo == "BOLETO":
+                info["boletos"].add(numero)
+                v = pf._float_br(linha.get("Valor") or "")
+                if v is not None:
+                    info["valores"].add(v)
 
 
 # ---------------------------------------------------------------- saude
@@ -759,7 +778,7 @@ def modalidades(codigos: set[str]) -> dict[str, str]:
         conn.close()
 
 
-def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> dict:
+def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str], assumidos: set[str] = frozenset()) -> dict:
     """Padrao NOV26 (padrao_faturamento): cobra os nomes da lista fechada nos
     dois portais, confere total do relatorio x boleto do mes e aponta arquivo
     fora do padrao (que nao vai pro cliente)."""
@@ -781,8 +800,9 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> di
         if codigo in saude:
             continue
         pasta = pasta_contrato(codigo, comp, empresa)
+        grupo = "Legado (Code)" if codigo in assumidos else "Legado (Cowork)"
         if codigo in enviados:
-            linhas.append({"grupo": "Legado (Cowork)", "codigo": codigo, "pasta": pasta, "falta": [], "obs": "já enviado"})
+            linhas.append({"grupo": grupo, "codigo": codigo, "pasta": pasta, "falta": [], "obs": "já enviado"})
             continue
         nomes = arquivos(pasta)
         st = status_cw.get(codigo)
@@ -799,13 +819,13 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str]) -> di
         falta += [f"NF de outro mês: {n}" for n in nfs_outro_mes]
         falta += pf.conferir_valores(pasta, codigo, comp, plano, copart, st["valores"] if st else set())
         if any(f.startswith("NFE_") for f in falta) and st and "NFE" not in st["tipos"]:
-            obs.append("NF ainda não emitida pela Hapvida (status do Cowork só tem boleto)")
+            obs.append(f"NF ainda não emitida pela Hapvida (status do {grupo[8:-1]} só tem boleto)")
         if falta and st and not st["emitido"]:
-            obs.append("Hapvida ainda não emitiu nº de boleto/NF (status do Cowork)")
+            obs.append(f"Hapvida ainda não emitiu nº de boleto/NF (status do {grupo[8:-1]})")
         fora = pf.fora_do_padrao(nomes)
         if fora:
             obs.append(f"fora do padrão (não vai pro cliente): {', '.join(fora)}")
-        linhas.append({"grupo": "Legado (Cowork)", "codigo": codigo, "pasta": pasta, "falta": falta, "obs": "; ".join(obs)})
+        linhas.append({"grupo": grupo, "codigo": codigo, "pasta": pasta, "falta": falta, "obs": "; ".join(obs)})
     return {"competencia": comp, "gerado_em": datetime.now().isoformat(timespec="seconds"), "contratos": linhas}
 
 
@@ -839,7 +859,7 @@ def escrever_relatorio(aud: dict, modo: str, avisos: dict, erros_lista: list[str
         md += ["### Observações em contratos completos", ""] + [f"- {l['codigo']}: {l['obs']}" for l in obs_completos] + [""]
     avisos_restantes = {c: a for c, a in avisos.items() if a and any(l["codigo"] == c and l["falta"] for l in incompletos)}
     if avisos_restantes or erros_lista:
-        md += ["## Avisos do download (Saúde)", ""]
+        md += ["## Avisos do download", ""]
         md += [f"- {c}: " + " | ".join(a) for c, a in sorted(avisos_restantes.items())]
         md += [f"- {e}" for e in erros_lista]
         md.append("")
@@ -854,7 +874,7 @@ def escrever_relatorio(aud: dict, modo: str, avisos: dict, erros_lista: list[str
 
 
 def escrever_handoff_cowork(aud: dict) -> str | None:
-    faltando = [l for l in aud["contratos"] if l["grupo"].startswith("Legado") and l["falta"]]
+    faltando = [l for l in aud["contratos"] if l["grupo"] == "Legado (Cowork)" and l["falta"]]
     if not faltando or not os.path.isdir(HANDOFF_ENTRADA):
         return None
     comp = aud["competencia"]
@@ -866,6 +886,10 @@ def escrever_handoff_cowork(aud: dict) -> str | None:
         "",
         "Contratos do Legado com arquivo faltando:",
     ]
+    assumidos = sorted(l["codigo"] for l in aud["contratos"] if l["grupo"] == "Legado (Code)")
+    if assumidos:
+        corpo[-1:-1] = [f"O Code já baixa sozinho (login automático, credencial no Bitwarden) e NÃO precisa de você: "
+                        f"{', '.join(assumidos)} (lista viva em `_status/LEGADO_ASSUMIDO_CODE.json`).", ""]
     corpo += [f"  - {l['codigo']}: {', '.join(l['falta'])}" + (f" ({l['obs']})" if l["obs"] else "") for l in faltando]
     corpo += [
         "",
@@ -880,6 +904,46 @@ def escrever_handoff_cowork(aud: dict) -> str | None:
     with open(caminho, "w", encoding="utf-8") as f:
         f.write("\n".join(corpo) + "\n")
     return caminho
+
+
+# ---------------------------------------------------------------- legado (Code)
+
+def legado_assumido(legado: dict[str, str]) -> tuple[set[str], dict]:
+    """Contratos do Legado que o Code baixa sozinho (legado_auto): Odonto com
+    credencial no segredo hapvida-legado (copiado do Bitwarden pelo
+    sync_bitwarden_legado.py). Grava a lista em _status/LEGADO_ASSUMIDO_CODE.json
+    pro Cowork pular esses."""
+    try:
+        creds = secrets_store.get_json("hapvida-legado")
+    except Exception:
+        creds = {}
+    mods = modalidades(set(legado))
+    assumidos = {c for c in legado if c in creds and pf.PLANO_DA_MODALIDADE.get(mods.get(c)) == "ODONTO"}
+    destino = os.path.join(BASE, "_status", "LEGADO_ASSUMIDO_CODE.json")
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    with open(destino, "w", encoding="utf-8") as f:
+        json.dump({"atualizado_em": datetime.now().isoformat(timespec="seconds"), "codigos": sorted(assumidos),
+                   "obs": "Contratos do Legado baixados pelo Code (legado_auto.py). O Cowork não baixa estes."},
+                  f, ensure_ascii=False, indent=1)
+    return assumidos, creds
+
+
+def baixar_legado(legado: dict[str, str], assumidos: set[str], creds: dict, comp: str) -> dict[str, list[str]]:
+    mes, ano = competencia_para_mes(comp)
+    enviados = codigos_ja_enviados(comp)
+    avisos: dict[str, list[str]] = {}
+    status: list[dict] = []
+    for codigo in sorted(assumidos - enviados):
+        try:
+            r = legado_auto.baixar_contrato(codigo, legado[codigo], creds[codigo], comp, mes, ano,
+                                            pasta_contrato(codigo, comp, legado[codigo]))
+            avisos[codigo] = r["avisos"]
+            status += r["status"]
+        except Exception as e:
+            avisos[codigo] = [f"Legado: {e}"]
+            log(f"legado {codigo}: ERRO {e}")
+    legado_auto.gravar_status(BASE, comp, status)
+    return avisos
 
 
 # ---------------------------------------------------------------- main
@@ -957,8 +1021,14 @@ def main() -> None:
     else:
         saude = contratos_saude(comp)
 
+    legado = contratos_legado()
+    assumidos, creds_legado = legado_assumido(legado)
+    if not so_auditoria and assumidos:
+        log(f"Legado pelo Code: {', '.join(sorted(assumidos))}")
+        avisos.update(baixar_legado(legado, assumidos, creds_legado, comp))
+
     log(f"xlsx gerados: {gerar_xlsx_relatorios(comp)}")
-    aud = auditar(comp, saude, contratos_legado())
+    aud = auditar(comp, saude, legado, assumidos)
     caminho = escrever_relatorio(aud, modo, avisos, erros_lista)
     handoff = escrever_handoff_cowork(aud)
     incompletos = [l["codigo"] for l in aud["contratos"] if l["falta"]]
