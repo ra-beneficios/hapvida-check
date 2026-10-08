@@ -10,7 +10,7 @@ Cron no host (00:01):
 Competencia = mes do vencimento: rodando do dia 20 em diante, e' o mes
 seguinte (28/09 -> OUT26); antes do dia 20, o proprio mes (04/10 -> OUT26).
 
-Legado (portal antigo), 07/10/2026: contrato Odonto com credencial no
+Legado (portal antigo), 07/10/2026: contrato (Odonto ou Saude) com credencial no
 Bitwarden (segredo hapvida-legado, copiado pelo sync_bitwarden_legado.py no
 host) e' baixado aqui pelo legado_auto.py; o resto continua com o Cowork
 (handoff). Lista viva em _status/LEGADO_ASSUMIDO_CODE.json.
@@ -909,8 +909,8 @@ def escrever_handoff_cowork(aud: dict) -> str | None:
 # ---------------------------------------------------------------- legado (Code)
 
 def legado_assumido(legado: dict[str, str]) -> tuple[set[str], dict]:
-    """Contratos do Legado que o Code baixa sozinho (legado_auto): Odonto com
-    credencial no segredo hapvida-legado (copiado do Bitwarden pelo
+    """Contratos do Legado que o Code baixa sozinho (legado_auto): Odonto e
+    Saude (08/10/2026) com credencial no segredo hapvida-legado (copiado do Bitwarden pelo
     sync_bitwarden_legado.py). Grava a lista em _status/LEGADO_ASSUMIDO_CODE.json
     pro Cowork pular esses."""
     try:
@@ -918,7 +918,9 @@ def legado_assumido(legado: dict[str, str]) -> tuple[set[str], dict]:
     except Exception:
         creds = {}
     mods = modalidades(set(legado))
-    assumidos = {c for c in legado if c in creds and pf.PLANO_DA_MODALIDADE.get(mods.get(c)) == "ODONTO"}
+    # CNPJ sem 14 digitos = Troca de Arquivos vai recusar (Y4VLX 08/10): fica com o Cowork ate corrigir
+    assumidos = {c for c in legado if c in creds and pf.PLANO_DA_MODALIDADE.get(mods.get(c))
+                 and len(creds[c].get("cnpj") or "") == 14}
     destino = os.path.join(BASE, "_status", "LEGADO_ASSUMIDO_CODE.json")
     os.makedirs(os.path.dirname(destino), exist_ok=True)
     with open(destino, "w", encoding="utf-8") as f:
@@ -930,13 +932,15 @@ def legado_assumido(legado: dict[str, str]) -> tuple[set[str], dict]:
 
 def baixar_legado(legado: dict[str, str], assumidos: set[str], creds: dict, comp: str) -> dict[str, list[str]]:
     mes, ano = competencia_para_mes(comp)
+    mods = modalidades(assumidos)
     enviados = codigos_ja_enviados(comp)
     avisos: dict[str, list[str]] = {}
     status: list[dict] = []
     for codigo in sorted(assumidos - enviados):
         try:
             r = legado_auto.baixar_contrato(codigo, legado[codigo], creds[codigo], comp, mes, ano,
-                                            pasta_contrato(codigo, comp, legado[codigo]))
+                                            pasta_contrato(codigo, comp, legado[codigo]),
+                                            pf.PLANO_DA_MODALIDADE[mods[codigo]])
             avisos[codigo] = r["avisos"]
             status += r["status"]
         except Exception as e:

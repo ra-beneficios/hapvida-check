@@ -5,7 +5,8 @@ de maquina, segredo `hapvida-legado` = {CODIGO: {"senha", "cnpj"}}.
 Roda no HOST (o CLI `bw` mora em ~/.local/bin, fora do container), antes do
 faturamento_mensal. O Andre cadastra/edita no Bitwarden: 1 item por contrato,
 com a URL webNewBoletoEmpresa.login, senha no campo de senha e campos
-personalizados pCodigo (ou o codigo no nome do item) e CNPJ.
+personalizados pCodigo (ou o codigo no nome do item) e CNPJ. Opcional:
+pSenhaTroca, quando a Troca de Arquivos usa outra senha (SY8MI).
 
 Login no Bitwarden pela API key pessoal guardada em `bitwarden-api`
 {client_id, client_secret, senha_mestra}. Nunca imprime segredo: so' os codigos.
@@ -60,6 +61,11 @@ def main() -> None:
             problemas.append(f"{cod} em mais de um item - usando o primeiro")
             continue
         legado[cod] = {"senha": senha, "cnpj": re.sub(r"\D", "", campos.get("CNPJ", "")).zfill(14)}
+        # SY8MI (08/10/2026): a Troca de Arquivos so' aceita a senha do 2o login do contrato
+        if campos.get("pSenhaTroca"):
+            legado[cod]["senha_troca"] = campos["pSenhaTroca"]
+        if len(legado[cod]["cnpj"]) != 14:
+            problemas.append(f"{cod}: CNPJ com {len(legado[cod]['cnpj'])} dígitos (esperado 14) - Troca de Arquivos vai recusar")
 
     if not legado:
         sys.exit("bitwarden: nenhum item do Legado encontrado - segredo anterior mantido")

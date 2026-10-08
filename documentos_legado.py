@@ -250,14 +250,19 @@ def buscar_nota_fiscal_boleto(url_sessao: str) -> list[dict]:
     do link de cada linha, achado real no #S7HNK)."""
     r = httpx.get(url_sessao, timeout=30, follow_redirects=True)
     r.raise_for_status()
+    return parse_nota_fiscal_html(r.text)
 
+
+def parse_nota_fiscal_html(texto: str) -> list[dict]:
+    """Linhas da tela pk_nota_fiscal.listaNotasFiscais (separado em 08/10/2026
+    pro legado_auto ler direto da pagina do navegador, sem 2o GET)."""
     linhas = []
     # Achado real 13/08 (achado no 611X2): a tabela tem pelo menos 2 formatos de
     # espacamento HTML entre as celulas - a versao antiga (regex rigida
     # </td>\s*<td>) nao casava com esse segundo formato (tudo numa linha so por
     # <tr>). Fix: parsear por bloco <tr>...</tr> e extrair todos os <a href>
     # daquele bloco, na ordem - agnostico a espacamento entre tags.
-    for tr in re.finditer(r"<tr>(.*?)</tr>", r.text, re.DOTALL):
+    for tr in re.finditer(r"<tr>(.*?)</tr>", texto, re.DOTALL):
         celulas = re.findall(r'<a[^>]*href="([^"]*)"[^>]*>\s*([^<]*?)\s*</a>', tr.group(1))
         if len(celulas) < 5:
             continue
