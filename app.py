@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 
 import base64
@@ -9,6 +9,7 @@ import tempfile
 import boletos_saude
 import censo_legado
 import censo_saude
+import ciclo_criticas
 import copart_saude
 import documentos_legado
 import documentos_saude
@@ -269,3 +270,71 @@ def exclusao_aprovar(p: ExclusaoAprovar):
 @app.post("/exclusao/enviar")
 def exclusao_enviar(p: ExclusaoEnviar):
     return _exclusao(exclusao_api.enviar, p.lote, p.onda, p.hash, p.solicitante_upn)
+
+
+# ── Ciclo de críticas (08/10/2026) — menu "Analisar críticas" e cartão de aprovação da Cora ──────────────────
+class CicloMovimentacoes(BaseModel):
+    contrato: str
+    data: str  # AAAA-MM-DD
+
+
+class CicloRodar(BaseModel):
+    contrato: str
+    controles: list[str]
+    solicitante_upn: str
+
+
+class CicloAprovar(BaseModel):
+    execucao_id: int
+    escopo: str  # AUTOMATICO | COM_SUGERIDAS
+    aprovado_por: str
+
+
+class CicloDescartar(BaseModel):
+    execucao_id: int
+    por: str
+
+
+def _ciclo(fn, *args):
+    try:
+        return fn(*args)
+    except ciclo_criticas.Recusa as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/ciclo/movimentacoes")
+def ciclo_movimentacoes(p: CicloMovimentacoes):
+    return {"movimentacoes": _ciclo(ciclo_criticas.movimentacoes_do_dia, p.contrato.upper(), p.data)}
+
+
+def _ciclo_em_segundo_plano(p: CicloRodar) -> None:
+    try:
+        ciclo_criticas.rodar(p.contrato, p.controles, {"origem": "MENU", "solicitante": p.solicitante_upn, "rodada": 1})
+    except ciclo_criticas.Recusa as e:
+        ciclo_criticas._cora("/notificar", {"upn": p.solicitante_upn, "texto": f"⚠️ Não analisei: {e}"})
+    except Exception as e:
+        print(f"[ciclo] erro na análise {p.contrato} {p.controles}: {type(e).__name__}: {e}")
+        ciclo_criticas._cora("/notificar", {"upn": p.solicitante_upn,
+                                            "texto": "⚠️ A análise de críticas deu erro técnico — avisei o André."})
+        ciclo_criticas._cora("/notificar", {"upn": ciclo_criticas.ciclo.APROVADOR,
+                                            "texto": f"🛠️ Ciclo de críticas falhou ({p.contrato} {p.controles}): {type(e).__name__}"})
+
+
+@app.post("/ciclo/rodar", status_code=202)
+def ciclo_rodar(p: CicloRodar, tarefas: BackgroundTasks):
+    if not p.controles:
+        raise HTTPException(status_code=409, detail="escolha ao menos uma movimentação")
+    tarefas.add_task(_ciclo_em_segundo_plano, p)
+    return {"aceito": True}
+
+
+@app.post("/ciclo/aprovar")
+def ciclo_aprovar(p: CicloAprovar):
+    if p.escopo not in ("AUTOMATICO", "COM_SUGERIDAS"):
+        raise HTTPException(status_code=409, detail="escopo inválido")
+    return _ciclo(ciclo_criticas.aprovar, p.execucao_id, p.escopo, p.aprovado_por)
+
+
+@app.post("/ciclo/descartar")
+def ciclo_descartar(p: CicloDescartar):
+    return _ciclo(ciclo_criticas.descartar, p.execucao_id, p.por)

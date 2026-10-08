@@ -61,6 +61,28 @@ STATUS_PT = {
 # "FileProcessed" (processado sem nenhuma critica) apareceu na 1a exclusao real (protocolo 1330271, 02/10) - sem
 # ele aqui, um envio 100% limpo ficava "em andamento" para sempre.
 STATUS_FINAIS_CONHECIDOS = {"FileProcessed", "FileProcessedWithReview", "ProcessFileWithPendency"}
+STATUS_COM_CRITICA = {"FileProcessedWithReview", "ProcessFileWithPendency"}
+# Ciclo de criticas (08/10/2026): com a chave ligada, movimentacao final com critica vai pro Motor de Criticas
+# (resolve o que der, reenvio so' com aprovacao do Andre, resto pro responsavel) em vez do relatorio cru.
+CICLO_NO_VIGIA = os.environ.get("CICLO_NO_VIGIA") == "1"
+# 12h depois ainda processando: reagenda de 2 em 2h ate 36h do envio; depois disso segue com o que tiver
+REAGENDAR_ATE_HORAS = 36
+
+
+def _rodar_ciclo(cur, linha: dict, control_code) -> bool:
+    """True se o ciclo tratou (e ja avisou todo mundo); False -> segue o fluxo antigo."""
+    if not CICLO_NO_VIGIA:
+        return False
+    try:
+        import ciclo_criticas
+        resumos = ciclo_criticas.do_acompanhamento(linha, control_code)
+        eid = next((r.get("execucao_id") for r in resumos if r.get("execucao_id")), None)
+        cur.execute("UPDATE movimentacoes_hapvida_acompanhamento SET ciclo_execucao_id=%s, controle_portal=%s WHERE id=%s",
+                    (eid, str(control_code), linha["id"]))
+        return True
+    except Exception as e:
+        print(f"[{linha['id']}] ciclo de criticas falhou, seguindo com o relatorio antigo: {type(e).__name__}: {e}")
+        return False
 
 
 def notificar(upn: str, texto: str) -> bool:
@@ -222,6 +244,8 @@ def processar_linha(cur, linha: dict) -> None:
                 (status_raw, linha["id"]),
             )
             extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, movimento.get("controlCode"), None)
+            if status_raw in STATUS_COM_CRITICA and _rodar_ciclo(cur, linha, movimento.get("controlCode")):
+                return
             notificar(
                 solicitante_upn,
                 f"✅ A {tipo} do {identificador} já processou no portal Hapvida — status: "
@@ -263,6 +287,21 @@ def processar_linha(cur, linha: dict) -> None:
         status_raw = movimento.get("status", "")
         status_legivel = STATUS_PT.get(status_raw, status_raw)
         control_code = movimento.get("controlCode")
+
+        horas = (datetime.datetime.now() - enviado_em_naive).total_seconds() / 3600
+        if CICLO_NO_VIGIA and status_raw not in STATUS_FINAIS_CONHECIDOS and horas < REAGENDAR_ATE_HORAS:
+            cur.execute("""UPDATE movimentacoes_hapvida_acompanhamento
+                           SET ultima_checagem_em = now(), detalhe_status = %s,
+                               proxima_checagem_em = now() + interval '2 hours'
+                           WHERE id = %s""", (status_raw, linha["id"]))
+            return
+        if status_raw in STATUS_COM_CRITICA:
+            if _rodar_ciclo(cur, linha, control_code):
+                _registrar_recusas_exclusao(linha, codigo_contrato, control_code, None)
+                cur.execute("""UPDATE movimentacoes_hapvida_acompanhamento
+                               SET status = 'CONCLUIDO', ultima_checagem_em = now(), notificado_em = now(),
+                                   detalhe_status = %s WHERE id = %s""", (status_raw, linha["id"]))
+                return
 
         # #156 - relatorio de verdade (nome/CPF/motivo), nao so o status - ver #155
         try:

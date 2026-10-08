@@ -25,6 +25,15 @@ services:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME}
+      # Ciclo de criticas (08/10/2026): motor do repo lifetools (so' leitura), dados/saidas com PII fora do
+      # SharePoint, schema saneamento no banco de producao (aprovado pelo Andre em 08/10). O vigia so' chama
+      # o ciclo com CICLO_NO_VIGIA=1 (ligar depois do menu validado).
+      SANEAMENTO_PATH: /lifetools_service
+      CICLO_DADOS: /dados_motor
+      SAIDA_MOTOR: /dados_motor/_saidas
+      SANEAMENTO_DB_NAME: ${SANEAMENTO_DB_NAME:-lifetools_dev}
+      SANEAMENTO_PERMITE_PROD: ${SANEAMENTO_PERMITE_PROD:-0}
+      CICLO_NO_VIGIA: ${CICLO_NO_VIGIA:-0}
     volumes:
       # Espelho local do SharePoint "Projeto_RA" (rclone bisync, ~10min) -
       # onde o processo de envio de documentos grava uma copia de cada
@@ -43,6 +52,8 @@ services:
       - /opt/lifetools/motor_exclusao:/motor/motor_exclusao:ro
       - /opt/projeto_ra/operadoras/hapvida/movimentacoes:/projeto_ra/movimentacoes
       - /home/superadmin/motor_exclusao_dados/lotes:/dados_exclusao
+      - /opt/lifetools/service:/lifetools_service:ro
+      - /home/superadmin/motor_criticas_dados:/dados_motor
     networks:
       - n8n_default
       - lifetools_default
