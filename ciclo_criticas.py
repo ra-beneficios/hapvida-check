@@ -239,19 +239,29 @@ def aprovar(eid: int, escopo: str, aprovado_por: str) -> dict:
             raise Recusa(f"não há carga {escopo} nessa análise")
         linhas = [l for l in row[0].splitlines() if l]
         contrato = e["contrato"]
-        # reconfere no portal: alguém da carga ficou ativo desde a análise? (reenvio manual, outra movimentação)
+        # reconfere no portal: alguém da carga já está no contrato, num arquivo mais novo (mesmo processando) ou
+        # num pedido via tela? Qualquer um -> não sobe. Consulta que falha -> não sobe.
         cpfs = {l[119:130].strip() for l in linhas}
-        pasta_conf = DADOS / "_conferencia" / str(eid)
-        with coleta_portal.sessao(contrato) as (page, headers):
-            coleta_portal.coletar_certificados(page, headers, contrato, pasta_conf, cpfs, refrescar=True)
-        cert = json.loads((pasta_conf / "certificados.json").read_text())
-        def ativo(d):
-            st = (d.get("statusDetail") or {}).get("description") or d.get("_status_lista") or ""
-            return st.strip().lower() == "ativo"
-        ja_ativos = [c for c in cpfs if any(ativo(d) for d in cert.get(c) or [])]
-        if ja_ativos:
-            raise Recusa(f"{len(ja_ativos)} pessoa(s) da carga já aparecem ativas no contrato desde a análise "
-                         "(alguém reenviou?). Não subi nada — rode \"Analisar críticas\" de novo nessa movimentação.")
+        with conn_s.cursor() as cur:
+            cur.execute("SELECT entrada_ref FROM saneamento.execucao WHERE id=%s", (eid,))
+            pasta = Path(cur.fetchone()[0])
+        desde = json.loads((pasta / "movimento.json").read_text()).get("createdAt") or ""
+        try:
+            with coleta_portal.sessao(contrato) as (page, headers):
+                conf = coleta_portal.conferir_antes_de_reenviar(page, headers, contrato, cpfs, desde, e["controle"])
+        except coleta_portal.ConferenciaInvalida as erro:
+            raise Recusa(f"não consegui conferir na Hapvida ({erro}) — sem conferência eu não subo nada. Tente de novo mais tarde.")
+        partes = []
+        if conf["no_contrato"]:
+            partes.append(f"{len(conf['no_contrato'])} já aparece(m) no contrato")
+        if conf["em_movimentacao"]:
+            partes.append(f"{len(conf['em_movimentacao'])} já está(ão) em movimentação mais nova "
+                          f"({', '.join(sorted(set(conf['em_movimentacao'].values())))})")
+        if conf["via_tela"]:
+            partes.append(f"{len(conf['via_tela'])} tem pedido feito pela tela")
+        if partes:
+            raise Recusa("das pessoas da carga, " + "; ".join(partes) + ". Não subi nada para não duplicar — "
+                         "analise a movimentação mais nova quando ela terminar de processar.")
         r = persistencia.aprovar(conn_s, eid, aprovado_por, viu_remocoes=True, escopo=escopo)
         if not r["ok"]:
             raise Recusa(r["erro"])
