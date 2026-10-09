@@ -5,8 +5,8 @@ que era do Cowork (Andre, 07/10/2026: "libero o login automatico").
 Credencial: cadastrada pelo Andre no Bitwarden (1 item por contrato, com as
 URLs dos 4 portais) e copiada pro cofre de maquina pelo
 sync_bitwarden_legado.py (host) como segredo `hapvida-legado`:
-{CODIGO: {"senha": ..., "cnpj": ...}}. Contrato sem credencial continua com o
-Cowork (handoff de sempre).
+{CODIGO: {"senha": ..., "cnpj": ...}}. Contrato sem credencial aparece na
+auditoria do faturamento_mensal como pendencia de cadastro (09/10/2026: sem Cowork).
 
 Por contrato, 4 logins (validados 07/10/2026 com 2M2DX e BY3S8 contra os
 arquivos de OUT26 do Cowork - analitico identico byte a byte, boleto e NF com
@@ -493,9 +493,41 @@ def main_status() -> None:
     log(f"status gravado em {caminho} | falhas: {falhas or 'nenhuma'}")
 
 
+def main_vidas(destino: str) -> None:
+    """Lista de ativos de cada contrato assumido, so' pra atualizar a base de vidas
+    (vidas/atualizar_hapvida.py, seg/qua/sex). Grava em `destino` (fora da pasta do
+    cliente: a lista que vai no faturamento continua sendo a do faturamento_mensal)."""
+    import faturamento_mensal as fm
+    legado = fm.contratos_legado()
+    assumidos, creds = fm.legado_assumido(legado)
+    os.makedirs(destino, exist_ok=True)
+    falhas = []
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        try:
+            for codigo in sorted(assumidos):
+                ctx = browser.new_context()
+                try:
+                    inicio = datetime.now()
+                    csv_b = lista_ativos(ctx.new_page(), codigo, creds[codigo]["senha"])
+                    _gravar(destino, f"LEGADO_{codigo}_{inicio:%Y%m%d_%H%M}.csv", csv_b)
+                    log(f"vidas {codigo}: lista gravada")
+                except Exception as e:
+                    falhas.append(f"{codigo}: {str(e)[:150]}")
+                    log(f"vidas {codigo}: ERRO {e}")
+                finally:
+                    ctx.close()
+                time.sleep(PAUSA)
+        finally:
+            browser.close()
+    log(f"vidas: {len(assumidos)} contratos | falhas: {falhas or 'nenhuma'}")
+
+
 if __name__ == "__main__":
     import sys
     if "--status" in sys.argv:
         main_status()
+    elif "--vidas" in sys.argv:
+        main_vidas(sys.argv[sys.argv.index("--vidas") + 1])
     else:
-        sys.exit("uso: legado_auto.py --status   (download mensal roda pelo faturamento_mensal.py)")
+        sys.exit("uso: legado_auto.py --status | --vidas DESTINO   (download mensal roda pelo faturamento_mensal.py)")
