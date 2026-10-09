@@ -2,7 +2,7 @@
 
 O motor mora no repo lifetools (`service/saneamento/`, montado só-leitura em /lifetools_service). Aqui só
 o que precisa do portal ou da Cora: coletar a movimentação, chamar o ciclo, avisar quem precisa e, depois
-do clique do pós-vendas responsável pelo contrato, subir o reenvio.
+do clique do pós-vendas que pediu, subir o reenvio (também o da planilha de correção devolvida).
 
 Quem dispara:
   - verificar_acompanhamentos.py (vigia #154/#156): movimentação da Cora chegou a status final;
@@ -10,10 +10,10 @@ Quem dispara:
   - a Cora, cartão de aprovação: POST /ciclo/aprovar e /ciclo/descartar.
 
 Regras (decisões do André, 08-09/10):
-  - reenvio só com APROVAÇÃO EM 1 CLIQUE do pós-vendas responsável pelo contrato (empresa_responsavel; sem
-    cadastro, o André) — "ele que vai aprovar e você executar" (09/10); antes de subir, reconfere no portal se alguém da carga
+  - revisão e aprovação SEMPRE do pós-vendas que pediu (sem solicitante, o responsável do contrato) — "nada pode
+    engargalar em mim" (09/10). Reenvio só com o clique dele; antes de subir, reconfere no portal se alguém da carga
     já ficou ativo desde a análise (se sim, não sobe e pede nova análise);
-  - o que o motor não resolve vai pro responsável interno (empresa_responsavel), nunca pro cliente;
+  - o que o motor não resolve vai pro mesmo pós-vendas (planilha CORRECAO_MOTOR), nunca pro cliente;
   - da 3ª rodada em diante o motor não propõe reenvio (proteção contra loop);
   - exclusão: layout de 189 posições, sem regra de correção ainda (nenhum caso real com crítica até 08/10):
     classifica cada crítica pelo catálogo e manda pro responsável; lacuna do catálogo vai pro André.
@@ -115,7 +115,7 @@ def rodar(contrato: str, controles: list[str], contexto: dict, notificar: bool =
         if coletadas:
             coletar_ceps.coletar(pasta_contrato, conn_l)
         resumos = [ciclo.executar_ciclo(str(p), conn_l, conn_s, contexto) for _, p in coletadas]
-        resumos += [_ciclo_exclusao(contrato, cc, p, conn_l) for cc, p in exclusoes]
+        resumos += [_ciclo_exclusao(contrato, cc, p, conn_l, contexto.get("solicitante")) for cc, p in exclusoes]
     finally:
         conn_l.close()
         conn_s.close()
@@ -126,7 +126,7 @@ def rodar(contrato: str, controles: list[str], contexto: dict, notificar: bool =
     return resumos
 
 
-def _ciclo_exclusao(contrato: str, controle: str, pasta: Path, conn_l) -> dict:
+def _ciclo_exclusao(contrato: str, controle: str, pasta: Path, conn_l, solicitante: str | None) -> dict:
     vidas = json.loads((pasta / "vidas.json").read_text())
     itens = []
     for v in vidas:
@@ -136,7 +136,7 @@ def _ciclo_exclusao(contrato: str, controle: str, pasta: Path, conn_l) -> dict:
         cods = [classificar(t, "VIDA").codigo for t in textos] or ["SEM_CRITICA"]
         itens.append({"linha": str(v.get("sequentialNumber")).zfill(7), "nome": (v.get("life") or {}).get("name"),
                       "status": v.get("status"), "criticas": " | ".join(textos), "categorias": ", ".join(cods)})
-    resp = ciclo.responsavel_interno(conn_l, contrato)
+    resp = ciclo.pos_vendas_do_pedido(conn_l, contrato, solicitante)
     arq = None
     if itens:
         from openpyxl import Workbook
@@ -233,7 +233,7 @@ def aprovar(eid: int, escopo: str, aprovado_por: str) -> dict:
     try:
         e = _execucao(conn_s, eid)
         if not e["aprovador"] or aprovado_por.lower() != e["aprovador"].lower():
-            raise Recusa("só o responsável do contrato aprova o reenvio do motor")
+            raise Recusa("só o pós-vendas que pediu esta análise aprova o reenvio")
         if e["status"] != "CONCLUIDA":
             raise Recusa(f"essa análise já está {e['status'].lower()} — nada a fazer")
         with conn_s.cursor() as cur:
@@ -247,13 +247,12 @@ def aprovar(eid: int, escopo: str, aprovado_por: str) -> dict:
         # reconfere no portal: alguém da carga já está no contrato, num arquivo mais novo (mesmo processando) ou
         # num pedido via tela? Qualquer um -> não sobe. Consulta que falha -> não sobe.
         cpfs = {l[119:130].strip() for l in linhas}
-        with conn_s.cursor() as cur:
-            cur.execute("SELECT entrada_ref FROM saneamento.execucao WHERE id=%s", (eid,))
-            pasta = Path(cur.fetchone()[0])
-        desde = json.loads((pasta / "movimento.json").read_text()).get("createdAt") or ""
+        controles = (e["contexto"] or {}).get("controles_origem") or [e["controle"]]
+        desde = max((json.loads((DADOS / contrato / str(c) / "movimento.json").read_text()).get("createdAt") or "")
+                    for c in controles)
         try:
             with coleta_portal.sessao(contrato) as (page, headers):
-                conf = coleta_portal.conferir_antes_de_reenviar(page, headers, contrato, cpfs, desde, e["controle"])
+                conf = coleta_portal.conferir_antes_de_reenviar(page, headers, contrato, cpfs, desde, controles)
         except coleta_portal.ConferenciaInvalida as erro:
             raise Recusa(f"não consegui conferir na Hapvida ({erro}) — sem conferência eu não subo nada. Tente de novo mais tarde.")
         partes = []
@@ -306,7 +305,7 @@ def descartar(eid: int, por: str) -> dict:
     try:
         e = _execucao(conn_s, eid)
         if not e["aprovador"] or por.lower() != e["aprovador"].lower():
-            raise Recusa("só o responsável do contrato decide o reenvio do motor")
+            raise Recusa("só o pós-vendas que pediu esta análise decide o reenvio")
         if e["status"] != "CONCLUIDA":
             raise Recusa(f"essa análise já está {e['status'].lower()} — nada a fazer")
         persistencia.marcar_desfecho(conn_s, eid, "DESCARTADA", por, {})
