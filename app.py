@@ -316,7 +316,7 @@ def _ciclo_em_segundo_plano(p: CicloRodar) -> None:
         print(f"[ciclo] erro na análise {p.contrato} {p.controles}: {type(e).__name__}: {e}")
         ciclo_criticas._cora("/notificar", {"upn": p.solicitante_upn,
                                             "texto": "⚠️ A análise de críticas deu erro técnico — avisei o André."})
-        ciclo_criticas._cora("/notificar", {"upn": ciclo_criticas.ciclo.APROVADOR,
+        ciclo_criticas._cora("/notificar", {"upn": ciclo_criticas.ciclo.ADMIN,
                                             "texto": f"🛠️ Ciclo de críticas falhou ({p.contrato} {p.controles}): {type(e).__name__}"})
 
 

@@ -2,15 +2,16 @@
 
 O motor mora no repo lifetools (`service/saneamento/`, montado só-leitura em /lifetools_service). Aqui só
 o que precisa do portal ou da Cora: coletar a movimentação, chamar o ciclo, avisar quem precisa e, depois
-do clique do André, subir o reenvio.
+do clique do pós-vendas responsável pelo contrato, subir o reenvio.
 
 Quem dispara:
   - verificar_acompanhamentos.py (vigia #154/#156): movimentação da Cora chegou a status final;
   - a Cora, menu "Analisar críticas": POST /ciclo/movimentacoes (lista do dia) e /ciclo/rodar;
   - a Cora, cartão de aprovação: POST /ciclo/aprovar e /ciclo/descartar.
 
-Regras (decisões do André, 08/10):
-  - reenvio só com APROVAÇÃO EM 1 CLIQUE do André; antes de subir, reconfere no portal se alguém da carga
+Regras (decisões do André, 08-09/10):
+  - reenvio só com APROVAÇÃO EM 1 CLIQUE do pós-vendas responsável pelo contrato (empresa_responsavel; sem
+    cadastro, o André) — "ele que vai aprovar e você executar" (09/10); antes de subir, reconfere no portal se alguém da carga
     já ficou ativo desde a análise (se sim, não sobe e pede nova análise);
   - o que o motor não resolve vai pro responsável interno (empresa_responsavel), nunca pro cliente;
   - da 3ª rodada em diante o motor não propõe reenvio (proteção contra loop);
@@ -162,7 +163,8 @@ def _texto_resumo(r: dict) -> str:
               f"(já ativas, repetidas ou com pedido aberto)."]
     if c["carga_com_sugeridas"]:
         partes.append(f"🔧 O motor corrigiu **{c['carga_com_sugeridas']} linha(s)** "
-                      f"({c['carga_automatica']} automática(s)) — aguardando a aprovação do André pra reenviar.")
+                      f"({c['carga_automatica']} automática(s)) — o cartão de aprovação do reenvio foi para "
+                      f"**{r['responsavel']['nome']}**.")
     if c["reenvio_bloqueado_por_rodada"]:
         partes.append(f"🔁 Esta já é a rodada {r['rodada']} de reenvio: o motor não reenvia mais sozinho, tudo vai pro responsável.")
     if r["pendencias"] or r["acao_portal"]:
@@ -189,7 +191,7 @@ def _notificar(r: dict, contexto: dict) -> None:
         if solicitante and solicitante.lower() != r["responsavel"]["upn"].lower():
             _cora("/notificar", {"upn": solicitante, "texto": texto})
         if r["nao_mapeadas"]:
-            _cora("/notificar", {"upn": ciclo.APROVADOR, "texto": f"🧩 Lacuna no catálogo do motor: {r['nao_mapeadas']} "
+            _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"🧩 Lacuna no catálogo do motor: {r['nao_mapeadas']} "
                                  f"crítica(s) de exclusão sem mapeamento ({r['contrato']}/{r['controle']})."})
         return
     texto = _texto_resumo(r)
@@ -198,14 +200,17 @@ def _notificar(r: dict, contexto: dict) -> None:
         _cora("/notificar-arquivo", {
             "upn": resp["upn"],
             "texto": texto + "\n\nNo anexo: corrija só as células em **vermelho** e me devolva o arquivo escrevendo "
-                             "**correção motor de críticas**. Nada vai à Hapvida sem a aprovação do André.",
+                             "**correção motor de críticas**.",
             "arquivo_base64": _arquivo_b64(r["arquivo_responsavel"]),
             "nome_arquivo": Path(r["arquivo_responsavel"]).name})
     if solicitante and solicitante.lower() != resp["upn"].lower():
         _cora("/notificar", {"upn": solicitante, "texto": texto})
+    if r["contadores"].get("nao_mapeadas"):
+        _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"🧩 Lacuna no catálogo do motor: {r['contadores']['nao_mapeadas']} "
+                             f"crítica(s) sem mapeamento ({r['contrato']}/{r['controle']}, execução {r['execucao_id']})."})
     if r["correcoes"]:
         _cora("/notificar-aprovacao-ciclo", {
-            "upn": ciclo.APROVADOR, "execucao_id": r["execucao_id"], "contrato": r["contrato"], "controle": r["controle"],
+            "upn": resp["upn"], "execucao_id": r["execucao_id"], "contrato": r["contrato"], "controle": r["controle"],
             "rodada": r["rodada"], "contadores": r["contadores"], "correcoes": r["correcoes"],
             "responsavel": resp["nome"], "origem": contexto.get("origem"),
             "relatorio_base64": _arquivo_b64(r["relatorio"]),
@@ -228,7 +233,7 @@ def aprovar(eid: int, escopo: str, aprovado_por: str) -> dict:
     try:
         e = _execucao(conn_s, eid)
         if not e["aprovador"] or aprovado_por.lower() != e["aprovador"].lower():
-            raise Recusa("só o André aprova reenvio do motor")
+            raise Recusa("só o responsável do contrato aprova o reenvio do motor")
         if e["status"] != "CONCLUIDA":
             raise Recusa(f"essa análise já está {e['status'].lower()} — nada a fazer")
         with conn_s.cursor() as cur:
@@ -301,7 +306,7 @@ def descartar(eid: int, por: str) -> dict:
     try:
         e = _execucao(conn_s, eid)
         if not e["aprovador"] or por.lower() != e["aprovador"].lower():
-            raise Recusa("só o André decide o reenvio do motor")
+            raise Recusa("só o responsável do contrato decide o reenvio do motor")
         if e["status"] != "CONCLUIDA":
             raise Recusa(f"essa análise já está {e['status'].lower()} — nada a fazer")
         persistencia.marcar_desfecho(conn_s, eid, "DESCARTADA", por, {})
@@ -322,7 +327,7 @@ def _notificar_complemento(comp: dict) -> None:
     _cora("/notificar-arquivo", {
         "upn": comp["responsavel"]["upn"],
         "texto": f"📋 **{comp['contrato']}, movimentação {comp['controle']}**: {comp['linhas']} linha(s) que o motor tinha "
-                 "corrigido não foram reenviadas (o André preferiu confirmar). Estão no anexo, com a sugestão do motor — "
+                 "corrigido não foram reenviadas (o cartão não aprovou essas linhas). Estão no anexo, com a sugestão do motor — "
                  "confirme com o cliente e me devolva escrevendo **correção motor de críticas**.",
         "arquivo_base64": _arquivo_b64(comp["arquivo_responsavel"]),
         "nome_arquivo": Path(comp["arquivo_responsavel"]).name})
@@ -346,7 +351,7 @@ def _registrar_acompanhamento(conn_l, contrato, confirmacao, protocolo, nome, li
                          (codigo_contrato, confirmacao_upload, nome_arquivo, total_vidas, solicitante_upn,
                           solicitante_nome, proxima_checagem_em, rodada, execucao_origem_id, controle_portal)
                        VALUES (%s,%s,%s,%s,%s,%s, now() + interval '45 minutes', %s, %s, %s)""",
-                    (contrato, confirmacao or protocolo, nome, linhas, ctx.get("solicitante") or ciclo.APROVADOR,
+                    (contrato, confirmacao or protocolo, nome, linhas, ctx.get("solicitante") or ciclo.ADMIN,
                      "Motor de Críticas", int(ctx.get("rodada") or 1) + 1, eid, protocolo))
 
 
