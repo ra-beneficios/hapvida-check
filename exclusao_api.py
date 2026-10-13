@@ -134,6 +134,18 @@ def enviar(lote: str, onda: str, hash_txt: str, solicitante_upn: str) -> dict:
     return {**envio, "upload": {k: v for k, v in resultado.items() if k != "body"}}
 
 
+def datas_do_envio(nome_arquivo: str) -> str:
+    """13/10 (pedido do Andre, C-MMIND): data PEDIDA x data que a Hapvida REGISTROU para um TXT de exclusao ja
+    processado -> bloco de texto para a mensagem final ("" se o arquivo nao e' de lote ou a consulta falhar)."""
+    achado = servico.contrato_do_envio(nome_arquivo, _pastas())
+    if not achado:
+        return ""
+    _, contrato = achado
+    auth = _login(contrato)
+    censo_saude.criar_sessao_empresa(auth, contrato)
+    return servico.texto_datas(servico.datas_do_envio(nome_arquivo, _pedidos_cancelamento(auth, contrato), _pastas()))
+
+
 def registrar_recusas(nome_arquivo: str, vidas_criticadas: list[dict]) -> dict | None:
     """Chamado pelo verificar_acompanhamentos quando um TXT de exclusao termina de processar: grava no lote quais
     vidas a Hapvida recusou (pela linha 701 do nosso arquivo). Best-effort - quem chama trata excecao."""

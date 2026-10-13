@@ -91,6 +91,19 @@ def _rodar_ciclo(cur, linha: dict, control_code) -> bool:
         return False
 
 
+def _datas_exclusao(linha: dict) -> str:
+    """Bloco "você pediu x a Hapvida registrou" (13/10). Best-effort: nunca derruba nem atrasa o aviso."""
+    nome = linha.get("nome_arquivo") or ""
+    if not nome.upper().startswith("EXCLUSAO_"):
+        return ""
+    try:
+        import exclusao_api
+        return exclusao_api.datas_do_envio(nome)
+    except Exception as e:
+        print(f"[{linha['id']}] nao consegui comparar as datas da exclusao: {e}")
+        return ""
+
+
 def _reagendar_por_entrega(cur, linha: dict) -> None:
     """13/10: o resultado final so' conta como entregue se a Cora confirmou. Senao volta pra fila em 15 min (o
     relatorio e' refeito e reenviado); antes o status virava CONCLUIDO e o aviso perdido nunca mais era tentado."""
@@ -335,7 +348,7 @@ def processar_linha(cur, linha: dict) -> None:
                 solicitante_upn,
                 f"✅ A {tipo} do {identificador} já processou no portal Hapvida — status: "
                 f"**{status_legivel}**. Se precisar do relatório detalhado de críticas, me avisa "
-                f"que eu busco." + extra_recusas + proxima_onda,
+                f"que eu busco." + extra_recusas + _datas_exclusao(linha) + proxima_onda,
             ):
                 _reagendar_por_entrega(cur, linha)
         else:
@@ -405,13 +418,13 @@ def processar_linha(cur, linha: dict) -> None:
             (status_raw, linha["id"]),
         )
 
-        extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, control_code, vidas)
+        extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, control_code, vidas) + _datas_exclusao(linha)
         texto = (
             f"📋 Resultado final da {tipo} do {identificador}, 12h depois do envio: "
             f"**{status_legivel}**.\n\n"
         )
         if not vidas:
-            texto += "Nenhuma vida com crítica ou cancelamento — tudo processou certinho. ✅" + proxima_onda
+            texto += "Nenhuma vida com crítica ou cancelamento — tudo processou certinho. ✅" + extra_recusas + proxima_onda
             entregue = notificar(solicitante_upn, texto)
         else:
             # 13/10 (Raphael, C-MMIND): numa EXCLUSAO o relatorio lista as vidas canceladas - isso e' o sucesso, nao
