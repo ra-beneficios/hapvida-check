@@ -45,6 +45,12 @@ DB = dict(
 
 CORA_NOTIFICAR_URL = os.environ.get("CORA_NOTIFICAR_URL", "http://cora:3978/notificar")
 CORA_NOTIFICAR_ARQUIVO_URL = os.environ.get("CORA_NOTIFICAR_ARQUIVO_URL", "http://cora:3978/notificar-arquivo")
+CORA_LEMBRAR_ONDA_URL = os.environ.get("CORA_LEMBRAR_ONDA_URL", "http://cora:3978/exclusao/lembrar-onda")
+ADMIN_UPN = os.environ.get("ADMIN_UPN", "andre.aguiar@ra-beneficios.com.br")
+# Lembrete da onda pendente (13/10, C-MMIND): 1o cartao assim que os titulares terminam, depois a cada 24h;
+# do 2o lembrete em diante o Andre tambem fica sabendo. Lote com titulares concluidos ha mais de 30 dias sai.
+LEMBRETE_INTERVALO_H = 24
+LEMBRETE_JANELA_DIAS = 30
 API_URL = os.environ.get("CONVERTER_ENDPOINT", "http://lifetools-api-1:8000")
 
 STATUS_PT = {
@@ -85,12 +91,91 @@ def _rodar_ciclo(cur, linha: dict, control_code) -> bool:
         return False
 
 
+def _reagendar_por_entrega(cur, linha: dict) -> None:
+    """13/10: o resultado final so' conta como entregue se a Cora confirmou. Senao volta pra fila em 15 min (o
+    relatorio e' refeito e reenviado); antes o status virava CONCLUIDO e o aviso perdido nunca mais era tentado."""
+    print(f"[{linha['id']}] notificacao final NAO entregue - nova tentativa em 15 min")
+    cur.execute("""UPDATE movimentacoes_hapvida_acompanhamento
+                   SET status = 'AGUARDANDO_CHECAGEM_RELATORIO', notificado_em = NULL,
+                       proxima_checagem_em = now() + interval '15 minutes',
+                       detalhe_status = 'entrega da notificacao falhou - nova tentativa'
+                   WHERE id = %s""", (linha["id"],))
+
+
+def lembrar_ondas_pendentes(cur, agora: datetime.datetime | None = None, simular: bool = False) -> list[str]:
+    """Exclusao: onda dos dependentes aprovada e NAO enviada, com a onda dos titulares do mesmo contrato ja
+    processada -> manda o cartao com o botao "Enviar onda 2" de novo pra quem pediu (o clique continua sendo dele).
+    Primeiro lembrete assim que os titulares terminam; depois a cada LEMBRETE_INTERVALO_H; do 2o em diante avisa
+    o Andre tambem. Nunca derruba o acompanhamento."""
+    agora = agora or datetime.datetime.now().astimezone()
+    feitos: list[str] = []
+    try:
+        import exclusao_api
+        servico, pastas = exclusao_api.servico, exclusao_api._pastas()
+        lotes = sorted(os.listdir(pastas.lotes))
+    except Exception as e:
+        print(f"[lembrete-onda] sem acesso aos lotes de exclusao: {e}")
+        return feitos
+    for lote_id in lotes:
+        try:
+            estado = servico.ler_estado(lote_id, pastas)
+        except Exception:
+            continue
+        if not estado.get("aprovacoes") or not estado.get("envios"):
+            continue
+        aprovados = estado["aprovacoes"][-1].get("arquivos") or []
+        enviados = {e["hash"] for e in estado["envios"]}
+        for dep in (a for a in aprovados if a["onda"] == "dependentes" and a["hash"] not in enviados):
+            tit = next((e for e in estado["envios"] if e["onda"] == "titulares" and e["contrato"] == dep["contrato"]), None)
+            if not tit:
+                continue
+            cur.execute("""SELECT status, notificado_em FROM movimentacoes_hapvida_acompanhamento
+                           WHERE nome_arquivo = %s ORDER BY id DESC LIMIT 1""", (tit["arquivo"],))
+            acomp = cur.fetchone()
+            if not acomp or acomp["status"] != "CONCLUIDO" or not acomp["notificado_em"]:
+                continue  # titulares ainda processando (ou aviso final ainda nao entregue)
+            if agora - acomp["notificado_em"] > datetime.timedelta(days=LEMBRETE_JANELA_DIAS):
+                continue
+            lembretes = [l for l in estado.get("lembretes", []) if l.get("hash") == dep["hash"]]
+            if lembretes and agora - datetime.datetime.fromisoformat(lembretes[-1]["em"]) < datetime.timedelta(hours=LEMBRETE_INTERVALO_H):
+                continue
+            dias = (agora - acomp["notificado_em"]).days
+            texto = (f"⏳ **Exclusão {dep['contrato']}: falta enviar a onda 2 ({dep['linhas']} dependentes).**\n"
+                     f"- Titulares: já processados pela Hapvida" + (f" há {dias} dia(s)" if dias else "") + "\n"
+                     f"- Dependentes: continuam **ativos** e entram na próxima fatura até serem enviados\n\n"
+                     f"Já está aprovado — é só clicar abaixo.")
+            if simular:
+                feitos.append(f"SIMULACAO {lote_id} {dep['contrato']} -> {estado['solicitante_upn']}")
+                continue
+            arquivo = {k: dep[k] for k in ("contrato", "onda", "linhas", "hash", "arquivo")} | {"vidas": []}
+            try:
+                r = requests.post(CORA_LEMBRAR_ONDA_URL, timeout=30,
+                                  json={"upn": estado["solicitante_upn"], "lote": lote_id, "arquivos": [arquivo], "texto": texto})
+                entregue = r.ok and r.json().get("enviado") is True
+            except Exception as e:
+                print(f"[lembrete-onda] {lote_id}: falha chamando a Cora: {e}")
+                entregue = False
+            if not entregue:
+                print(f"[lembrete-onda] {lote_id}: lembrete NAO entregue - tenta de novo na proxima rodada")
+                continue
+            estado.setdefault("lembretes", []).append({"hash": dep["hash"], "em": agora.isoformat(), "para": estado["solicitante_upn"]})
+            servico._salvar_estado(estado, pastas)
+            if len(lembretes) >= 1:
+                notificar(ADMIN_UPN, f"⏳ Exclusão {dep['contrato']} (lote `{lote_id}`): a onda 2 ({dep['linhas']} dependentes) "
+                                     f"segue sem envio — {len(lembretes) + 1}º lembrete para {estado['solicitante_upn']}.")
+            feitos.append(f"{lote_id} {dep['contrato']} -> {estado['solicitante_upn']} ({len(lembretes) + 1}º)")
+    for f in feitos:
+        print(f"[lembrete-onda] {f}")
+    return feitos
+
+
 def notificar(upn: str, texto: str) -> bool:
     if not upn:
         return False
     try:
         resp = requests.post(CORA_NOTIFICAR_URL, json={"upn": upn, "texto": texto}, timeout=15)
-        return resp.ok
+        # 13/10: 200 nao basta - a Cora responde {"enviado": false} quando a DM nao saiu
+        return resp.ok and resp.json().get("enviado") is True
     except Exception as e:
         print(f"[notificar] falha ao chamar Cora: {e}")
         return False
@@ -123,7 +208,7 @@ def notificar_com_relatorio(
             },
             timeout=15,
         )
-        return resp_cora.ok
+        return resp_cora.ok and resp_cora.json().get("enviado") is True
     except Exception as e:
         print(f"[notificar_com_relatorio] falha: {e}")
         return False
@@ -246,12 +331,13 @@ def processar_linha(cur, linha: dict) -> None:
             extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, movimento.get("controlCode"), None)
             if status_raw in STATUS_COM_CRITICA and _rodar_ciclo(cur, linha, movimento.get("controlCode")):
                 return
-            notificar(
+            if not notificar(
                 solicitante_upn,
                 f"✅ A {tipo} do {identificador} já processou no portal Hapvida — status: "
                 f"**{status_legivel}**. Se precisar do relatório detalhado de críticas, me avisa "
                 f"que eu busco." + extra_recusas + proxima_onda,
-            )
+            ):
+                _reagendar_por_entrega(cur, linha)
         else:
             cur.execute(
                 """UPDATE movimentacoes_hapvida_acompanhamento
@@ -326,15 +412,23 @@ def processar_linha(cur, linha: dict) -> None:
         )
         if not vidas:
             texto += "Nenhuma vida com crítica ou cancelamento — tudo processou certinho. ✅" + proxima_onda
-            notificar(solicitante_upn, texto)
+            entregue = notificar(solicitante_upn, texto)
         else:
-            texto += f"⚠️ {len(vidas)} vida(s) com crítica ou cancelamento — relatório completo no anexo." + extra_recusas
-            enviado = notificar_com_relatorio(codigo_contrato, control_code, vidas, solicitante_upn, texto)
-            if not enviado:
+            # 13/10 (Raphael, C-MMIND): numa EXCLUSAO o relatorio lista as vidas canceladas - isso e' o sucesso, nao
+            # critica. O aviso dizia "⚠️ 101 vida(s) com critica" e nao falava da onda 2; os dependentes ficaram 4 dias.
+            if tipo == "exclusão":
+                texto += (f"{len(vidas)} vida(s) no relatório da Hapvida (canceladas e eventuais críticas) — detalhe no anexo."
+                          + extra_recusas + proxima_onda)
+            else:
+                texto += f"⚠️ {len(vidas)} vida(s) com crítica ou cancelamento — relatório completo no anexo." + extra_recusas
+            entregue = notificar_com_relatorio(codigo_contrato, control_code, vidas, solicitante_upn, texto)
+            if not entregue:
                 # #156 - fallback: se o relatorio XLSX falhar por qualquer motivo, nao deixa o
                 # solicitante sem nada - manda o texto corrido mesmo (pior formato, mas melhor
                 # que silencio)
-                notificar(solicitante_upn, texto + "\n\n(não consegui gerar o arquivo agora, avisando por texto)")
+                entregue = notificar(solicitante_upn, texto + "\n\n(não consegui gerar o arquivo agora, avisando por texto)")
+        if not entregue:
+            _reagendar_por_entrega(cur, linha)
 
 
 def run() -> None:
@@ -357,6 +451,8 @@ def run() -> None:
             processar_linha(cur, linha)
         except Exception as e:
             print(f"[{linha['id']}] erro processando: {e}")
+
+    lembrar_ondas_pendentes(cur, simular=os.environ.get("LEMBRETE_SIMULAR") == "1")
 
     cur.close()
     conn.close()
