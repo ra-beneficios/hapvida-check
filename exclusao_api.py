@@ -12,6 +12,7 @@ Achados que moldaram isto (lote EPC10/2XP6W, 02-03/10/2026):
 - a fila da Hapvida levou de ~3h a ~9h30 para processar.
 """
 import base64
+import fcntl
 import os
 import sys
 import time
@@ -113,7 +114,18 @@ def _achar_protocolo(contrato: str, nome_arquivo: str, tentativas: int = 3) -> s
 
 
 def enviar(lote: str, onda: str, hash_txt: str, solicitante_upn: str) -> dict:
+    """Um envio por lote de cada vez (13/10: a onda 1 sai sozinha no "Aprovar"; dois cliques quase juntos
+    passariam os dois pela checagem de "ja enviado" antes de qualquer um registrar o envio)."""
     pastas = _pastas()
+    with open(os.path.join(pastas.lotes, os.path.basename(lote), ".envio.lock"), "w") as trava:
+        try:
+            fcntl.flock(trava, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise PendenciaAprovacao("ja tem um envio deste lote em andamento - aguarde o resultado dele")
+        return _enviar(lote, onda, hash_txt, solicitante_upn, pastas)
+
+
+def _enviar(lote: str, onda: str, hash_txt: str, solicitante_upn: str, pastas: servico.Pastas) -> dict:
     alvo = servico.preparar_envio(lote, onda, hash_txt, solicitante_upn, pastas)
     if onda == "dependentes":
         estado = servico.ler_estado(lote, pastas)
