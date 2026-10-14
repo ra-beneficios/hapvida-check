@@ -338,3 +338,27 @@ def ciclo_aprovar(p: CicloAprovar):
 @app.post("/ciclo/descartar")
 def ciclo_descartar(p: CicloDescartar):
     return _ciclo(ciclo_criticas.descartar, p.execucao_id, p.por)
+
+
+# ── Porta de entrada da inclusão (13/10/2026): quem do arquivo já está ativo na Hapvida (consulta ao vivo) ──
+class ConsultarCpfs(BaseModel):
+    contrato: str
+    cpfs: list[str]
+
+
+@app.post("/inclusao/consultar-cpfs")
+def inclusao_consultar_cpfs(p: ConsultarCpfs):
+    """Só leitura (GET na API do portal moderno). -> {"certificados": {cpf: [detalhe]}, "consultados": [cpf]}.
+    409 quando não há acesso ao contrato pela API (sem credencial/sessão) — quem chama usa a base de vidas."""
+    import re as _re
+    contrato = p.contrato.strip().upper()
+    cpfs = {c for c in p.cpfs if _re.fullmatch(r"\d{11}", c or "")}
+    if not _re.fullmatch(r"[0-9A-Z]{5}", contrato) or not cpfs or len(cpfs) > 3000:
+        raise HTTPException(status_code=409, detail="contrato ou lista de CPFs inválida")
+    try:
+        with ciclo_criticas.coleta_portal.sessao(contrato) as (page, headers):
+            return ciclo_criticas.coleta_portal.consultar_cpfs(page, headers, contrato, cpfs)
+    except Exception as e:
+        print(f"[inclusao/consultar-cpfs] {contrato}: sem consulta ao vivo: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=409, detail=f"sem acesso ao contrato {contrato} pela API da Hapvida")
+
