@@ -51,6 +51,9 @@ ADMIN_UPN = os.environ.get("ADMIN_UPN", "andre.aguiar@ra-beneficios.com.br")
 # do 2o lembrete em diante o Andre tambem fica sabendo. Lote com titulares concluidos ha mais de 30 dias sai.
 LEMBRETE_INTERVALO_H = 24
 LEMBRETE_JANELA_DIAS = 30
+# Onda 2 automatica (13/10, Andre): com os titulares processados, o vigia envia a onda dos dependentes sozinho (o
+# aval ja foi dado no "Aprovar"). Uma tentativa automatica por arquivo; se falhar, cai no lembrete com o botao.
+ONDA2_AUTOMATICA = os.environ.get("ONDA2_AUTOMATICA", "1") == "1"
 API_URL = os.environ.get("CONVERTER_ENDPOINT", "http://lifetools-api-1:8000")
 
 STATUS_PT = {
@@ -115,9 +118,48 @@ def _reagendar_por_entrega(cur, linha: dict) -> None:
                    WHERE id = %s""", (linha["id"],))
 
 
+def _enviar_onda2(cur, exclusao_api, lote_id: str, estado: dict, dep: dict) -> bool:
+    """Envia a onda dos dependentes sozinho. -> True se subiu (entra no acompanhamento e avisa quem pediu).
+    A tentativa fica gravada no lote: falhou uma vez, nao tenta de novo sozinho (vai pro lembrete com botao)."""
+    upn = estado["solicitante_upn"]
+    try:
+        r = exclusao_api.enviar(lote_id, "dependentes", dep["hash"], upn)
+        # mesmo criterio do enviar() para gravar o envio: 200 ou protocolo achado na lista do portal
+        ok = r.get("status") == 200 or bool(r.get("protocolo"))
+        erro = None if ok else f"upload HTTP {r.get('status')}"
+    except Exception as e:  # PendenciaAprovacao (ex.: titulares ainda nao processados no portal) ou falha tecnica
+        r, ok, erro = {}, False, str(e)[:300]
+    servico, pastas = exclusao_api.servico, exclusao_api._pastas()
+    estado_novo = servico.ler_estado(lote_id, pastas)  # o enviar() grava o envio no estado - nao sobrescrever
+    estado_novo.setdefault("auto_onda2", []).append({"hash": dep["hash"], "em": datetime.datetime.now().astimezone().isoformat(),
+                                                     "ok": ok, "protocolo": r.get("protocolo"), "erro": erro})
+    servico._salvar_estado(estado_novo, pastas)
+    if not ok:
+        print(f"[onda2-auto] {lote_id} {dep['contrato']}: nao enviei sozinho: {erro}")
+        notificar(ADMIN_UPN, f"⚠️ Exclusão {dep['contrato']} (lote `{lote_id}`): a onda 2 automática não saiu ({erro}). "
+                             f"Mandei o cartão com o botão para {upn}.")
+        return False
+    try:  # ja subiu: daqui pra baixo nada pode derrubar o vigia nem levar a reenviar
+        cur.execute("""INSERT INTO movimentacoes_hapvida_acompanhamento
+                         (codigo_contrato, confirmacao_upload, nome_arquivo, total_vidas, solicitante_upn, solicitante_nome,
+                          proxima_checagem_em)
+                       VALUES (%s, %s, %s, %s, %s, %s, now() + interval '45 minutes')""",
+                    (r["contrato"], r.get("protocolo"), r["arquivo"], r["linhas"], upn, "Motor de Exclusão (onda 2 automática)"))
+    except Exception as e:
+        print(f"[onda2-auto] {lote_id}: enviada, mas nao registrei o acompanhamento: {e}")
+        notificar(ADMIN_UPN, f"⚠️ Exclusão {dep['contrato']} (lote `{lote_id}`): onda 2 enviada (protocolo "
+                             f"{r.get('protocolo')}), mas o acompanhamento não foi registrado — conferir à mão.")
+    notificar(upn, f"✅ **Exclusão {dep['contrato']}: enviei a onda 2 ({r['linhas']} dependentes)** — os titulares já "
+                   f"estavam processados. Protocolo **{r.get('protocolo') or 'a confirmar'}**. A Hapvida leva de 3 a 10 horas; "
+                   f"te aviso o resultado aqui.")
+    print(f"[onda2-auto] {lote_id} {dep['contrato']}: onda 2 enviada, protocolo {r.get('protocolo')}")
+    return True
+
+
 def lembrar_ondas_pendentes(cur, agora: datetime.datetime | None = None, simular: bool = False) -> list[str]:
     """Exclusao: onda dos dependentes aprovada e NAO enviada, com a onda dos titulares do mesmo contrato ja
-    processada -> manda o cartao com o botao "Enviar onda 2" de novo pra quem pediu (o clique continua sendo dele).
+    processada -> com ONDA2_AUTOMATICA, envia sozinho (1 tentativa por arquivo); sem ela, ou se a tentativa falhou,
+    manda o cartao com o botao "Enviar onda 2" de novo pra quem pediu.
     Primeiro lembrete assim que os titulares terminam; depois a cada LEMBRETE_INTERVALO_H; do 2o em diante avisa
     o Andre tambem. Nunca derruba o acompanhamento."""
     agora = agora or datetime.datetime.now().astimezone()
@@ -149,6 +191,15 @@ def lembrar_ondas_pendentes(cur, agora: datetime.datetime | None = None, simular
                 continue  # titulares ainda processando (ou aviso final ainda nao entregue)
             if agora - acomp["notificado_em"] > datetime.timedelta(days=LEMBRETE_JANELA_DIAS):
                 continue
+            tentou = any(t.get("hash") == dep["hash"] for t in estado.get("auto_onda2", []))
+            if ONDA2_AUTOMATICA and not tentou:
+                if simular:
+                    feitos.append(f"SIMULACAO onda2-auto {lote_id} {dep['contrato']} -> {estado['solicitante_upn']}")
+                    continue
+                if _enviar_onda2(cur, exclusao_api, lote_id, estado, dep):
+                    feitos.append(f"{lote_id} {dep['contrato']} onda 2 enviada sozinha")
+                    continue
+                estado = servico.ler_estado(lote_id, pastas)  # recarrega (tentativa gravada) antes do lembrete
             lembretes = [l for l in estado.get("lembretes", []) if l.get("hash") == dep["hash"]]
             if lembretes and agora - datetime.datetime.fromisoformat(lembretes[-1]["em"]) < datetime.timedelta(hours=LEMBRETE_INTERVALO_H):
                 continue
@@ -156,7 +207,7 @@ def lembrar_ondas_pendentes(cur, agora: datetime.datetime | None = None, simular
             texto = (f"⏳ **Exclusão {dep['contrato']}: falta enviar a onda 2 ({dep['linhas']} dependentes).**\n"
                      f"- Titulares: já processados pela Hapvida" + (f" há {dias} dia(s)" if dias else "") + "\n"
                      f"- Dependentes: continuam **ativos** e entram na próxima fatura até serem enviados\n\n"
-                     f"Já está aprovado — é só clicar abaixo.")
+                     + (f"Tentei enviar sozinho e não consegui — " if ONDA2_AUTOMATICA else "") + f"Já está aprovado — é só clicar abaixo.")
             if simular:
                 feitos.append(f"SIMULACAO {lote_id} {dep['contrato']} -> {estado['solicitante_upn']}")
                 continue
@@ -307,8 +358,10 @@ def processar_linha(cur, linha: dict) -> None:
     nome_arquivo = linha.get("nome_arquivo") or ""
     tipo = "exclusão" if nome_arquivo.upper().startswith("EXCLUSAO_") else "inclusão"
     proxima_onda = (
-        "\n\nA onda dos **titulares** terminou — agora você já pode clicar em **Enviar onda 2 (dependentes)** "
-        "no cartão da exclusão."
+        ("\n\nA onda dos **titulares** terminou — se houver onda 2 (dependentes), eu envio agora e te aviso o protocolo."
+         if ONDA2_AUTOMATICA else
+         "\n\nA onda dos **titulares** terminou — agora você já pode clicar em **Enviar onda 2 (dependentes)** "
+         "no cartão da exclusão.")
         if "_titulares_" in nome_arquivo else ""
     )
 
