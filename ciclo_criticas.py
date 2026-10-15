@@ -121,6 +121,16 @@ def rodar(contrato: str, controles: list[str], contexto: dict, notificar: bool =
         conn_s.close()
     for r in resumos:
         print("[ciclo]", ciclo.resumo_json(r) if "execucao_id" in r else json.dumps({k: r[k] for k in ("contrato", "controle", "tipo")}))
+        if r.get("reenvio_automatico"):
+            # PROCESSO_INCLUSAO_HAPVIDA.md (15/10/2026), passo 12: o motor reenvia o que corrigiu com fonte certa, sem
+            # aprovação e sem avisar o pós-vendas. Falha técnica vai pro André; quem já entrou sai da carga.
+            try:
+                r["reenvio"] = aprovar(r["execucao_id"], "AUTOMATICO", r["responsavel"]["upn"], sistema=True)
+            except Recusa as erro:
+                r["reenvio"] = {"enviado": False, "erro": str(erro)}
+                _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"⚠️ Reenvio automático do motor não subiu "
+                                     f"({r['contrato']}/{r['controle']}, execução {r['execucao_id']}): {erro}"})
+            print("[ciclo] reenvio automático", r["execucao_id"], json.dumps(r["reenvio"], default=str)[:300])
         if notificar:
             _notificar(r, contexto)
     return resumos
@@ -194,8 +204,22 @@ def _notificar(r: dict, contexto: dict) -> None:
             _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"🧩 Lacuna no catálogo do motor: {r['nao_mapeadas']} "
                                  f"crítica(s) de exclusão sem mapeamento ({r['contrato']}/{r['controle']})."})
         return
-    texto = _texto_resumo(r)
     resp = r["responsavel"]
+    if contexto.get("origem") == "VIGIA_INCLUSAO":
+        # passos 12 e 14: silêncio pro pós-vendas; só o arquivo do lote com o que o motor não resolveu
+        if r["arquivo_responsavel"]:
+            _cora("/notificar-arquivo", {
+                "upn": resp["upn"],
+                "texto": f"📋 **Lote {r['controle']} ({r['contrato']})**: {r['pendencias'] + r['acao_portal']} vida(s) que o "
+                         "motor não conseguiu resolver. Corrija só as células em **vermelho** e me devolva o arquivo "
+                         "escrevendo **correção motor de críticas**.",
+                "arquivo_base64": _arquivo_b64(r["arquivo_responsavel"]),
+                "nome_arquivo": Path(r["arquivo_responsavel"]).name})
+        if r["contadores"].get("nao_mapeadas"):
+            _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"🧩 Lacuna no catálogo do motor: {r['contadores']['nao_mapeadas']} "
+                                 f"crítica(s) sem mapeamento ({r['contrato']}/{r['controle']}, execução {r['execucao_id']})."})
+        return
+    texto = _texto_resumo(r)
     if r["arquivo_responsavel"]:
         _cora("/notificar-arquivo", {
             "upn": resp["upn"],
@@ -228,7 +252,9 @@ def _execucao(conn_s, eid: int) -> dict:
     return dict(zip(("status", "aprovador", "contrato", "controle", "contexto"), row))
 
 
-def aprovar(eid: int, escopo: str, aprovado_por: str) -> dict:
+def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> dict:
+    """sistema=True (reenvio automático do motor, 15/10): quem já entrou no contrato / está em movimentação mais nova
+    sai da carga em vez de travar tudo, e não há complemento (as sugestões já foram pro pós-vendas no arquivo do lote)."""
     conn_s = conectar_saneamento()
     try:
         e = _execucao(conn_s, eid)
@@ -263,6 +289,14 @@ def aprovar(eid: int, escopo: str, aprovado_por: str) -> dict:
                           f"({', '.join(sorted(set(conf['em_movimentacao'].values())))})")
         if conf["via_tela"]:
             partes.append(f"{len(conf['via_tela'])} tem pedido feito pela tela")
+        if partes and sistema:
+            fora = set(conf["no_contrato"]) | set(conf["em_movimentacao"]) | set(conf["via_tela"])
+            linhas = [l for l in linhas if l[119:130].strip() not in fora]
+            linhas = [l[:0] + f"{i:07d}" + l[7:] for i, l in enumerate(linhas, 1)]
+            if not linhas:
+                persistencia.marcar_desfecho(conn_s, eid, "DESCARTADA", aprovado_por, {"motivo": "todos já no contrato"})
+                return {"enviado": False, "status": None, "contrato": contrato, "linhas": 0, "motivo": "todos já no contrato"}
+            partes = []
         if partes:
             raise Recusa("das pessoas da carga, " + "; ".join(partes) + ". Não subi nada para não duplicar — "
                          "analise a movimentação mais nova quando ela terminar de processar.")
@@ -271,7 +305,7 @@ def aprovar(eid: int, escopo: str, aprovado_por: str) -> dict:
             raise Recusa(r["erro"])
         nome = f"CICLO_{eid}_{contrato}.txt"
         caminho = Path(tempfile.mkdtemp()) / nome
-        caminho.write_bytes(row[0].encode("ascii"))
+        caminho.write_bytes("".join(l + "\n" for l in linhas).encode("ascii") if sistema else row[0].encode("ascii"))
         try:
             up = ms.run_inclusao(os.environ.get("GCP_PROJECT", ""), contrato, str(caminho))
         finally:
@@ -289,7 +323,7 @@ def aprovar(eid: int, escopo: str, aprovado_por: str) -> dict:
         conn_l = _conn_leitura()
         try:
             _registrar_acompanhamento(conn_l, contrato, confirmacao, protocolo, nome, len(linhas), ctx, eid)
-            comp = ciclo.complemento_para_responsavel(conn_l, conn_s, eid)
+            comp = None if sistema else ciclo.complemento_para_responsavel(conn_l, conn_s, eid)
         finally:
             conn_l.close()
         if comp:
