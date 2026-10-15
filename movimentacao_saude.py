@@ -211,7 +211,9 @@ def enviar_movimentacao(usuario: str, senha: str, codigo_contrato: str, arquivo_
 # DAVJV (UTC Óleo e Gás) só é visível na conta da Marco no portal — achado real da apuração
 # XFP6J/B6PJX (ver scripts_cowork/patch2_modalidade/153_xfp6j_superado_por_b6pjx.md). Qualquer
 # outro contrato usa a conta padrão da Carol.
-CONTRATOS_CONTA_MARCO = {"DAVJV"}
+# 15/10/2026 (André): conta do sistema = Cora em TODOS os contratos (testado: Cora entra nas movimentações do DAVJV).
+# A conta do Vinicios (hapvida-portal-saude-marco) fica só de backup. Conjunto vazio = ninguém usa mais o backup aqui.
+CONTRATOS_CONTA_MARCO: set[str] = set()
 
 
 def run_inclusao(project: str, codigo_contrato: str, arquivo_txt_path: str) -> dict:

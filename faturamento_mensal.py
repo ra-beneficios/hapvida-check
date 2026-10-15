@@ -57,7 +57,10 @@ PLANILHA_LEGADO = "/projeto_ra/operadoras/Access/Hapvida/empresas_hapvida.xlsx"
 
 # DAVJV/B6PJX so' abrem com a conta do Marcos/Vinicius (#147) - mesma regra
 # do endpoint /enviar-documentos-contrato.
-CODIGOS_CONTA_MARCO = ("DAVJV", "B6PJX")
+# 15/10/2026: B6PJX migrado pra Cora (testado). DAVJV fica no Vinicios (backup) só na parte FINANCEIRA: a Cora entra
+# nas movimentações do DAVJV mas unpaid-bills dela trava (timeout) enquanto o Vinicios traz as faturas — rever quando
+# a Hapvida liberar o financeiro do DAVJV pra Cora.
+CODIGOS_CONTA_MARCO = ("DAVJV",)
 # Contratos ativos SEM faturamento proprio pra baixar/enviar (Andre, 02/10/2026):
 # - 9WLZU/9GBKA (Boaventura): fora do envio por decisao gerencial (so' vidas, #150)
 # - ENUHC (LH) e DLIHM (Heftos): ativos, mas sem movimentacao e sem fatura
