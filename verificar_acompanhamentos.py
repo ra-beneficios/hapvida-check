@@ -337,6 +337,13 @@ def processar_linha(cur, linha: dict) -> None:
     except Exception as e:
         print(f"[{linha['id']}] erro checando status: {e}")
         return
+    # 15/10 (lote 4DFEV/FHMWR): portal instável devolveu erro na lista -> "não encontrado" virava FALHOU (falso alarme
+    # ao André). Erro da API não é resposta: tenta de novo na próxima rodada do vigia.
+    if "erro_http" in dados or not isinstance((dados.get("content") or {}).get("movements"), list):
+        print(f"[{linha['id']}] lista de movimentações não veio ({dados.get('erro_http')}): tento de novo depois")
+        cur.execute("UPDATE movimentacoes_hapvida_acompanhamento SET proxima_checagem_em = now() + interval '30 minutes', "
+                    "ultima_checagem_em = now() WHERE id = %s", (linha["id"],))
+        return
 
     # enviado_em vem do Postgres com tzinfo America/Sao_Paulo (-03:00) - createdAt da API vem
     # sem tzinfo mas bate com o horario local (BRT) mostrado na tela do portal - compara os
