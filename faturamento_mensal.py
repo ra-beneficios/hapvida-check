@@ -57,9 +57,8 @@ PLANILHA_LEGADO = "/projeto_ra/operadoras/Access/Hapvida/empresas_hapvida.xlsx"
 
 # DAVJV/B6PJX so' abrem com a conta do Marcos/Vinicius (#147) - mesma regra
 # do endpoint /enviar-documentos-contrato.
-# 15/10/2026: B6PJX migrado pra Cora (testado). DAVJV fica no Vinicios (backup) só na parte FINANCEIRA: a Cora entra
-# nas movimentações do DAVJV mas unpaid-bills dela trava (timeout) enquanto o Vinicios traz as faturas — rever quando
-# a Hapvida liberar o financeiro do DAVJV pra Cora.
+# 15/10/2026: DAVJV segue num fluxo próprio (herança de quando só o Vinicios o enxergava), mas com a conta da Cora
+# (ver creds["marco"] em main). B6PJX entra no fluxo normal.
 CODIGOS_CONTA_MARCO = ("DAVJV",)
 # Contratos ativos SEM faturamento proprio pra baixar/enviar (Andre, 02/10/2026):
 # - 9WLZU/9GBKA (Boaventura): fora do envio por decisao gerencial (so' vidas, #150)
@@ -974,7 +973,9 @@ def main() -> None:
     if not so_auditoria:
         creds = {
             "carol": scraper.get_credentials(project, "hapvida-portal-saude"),
-            "marco": scraper.get_credentials(project, "hapvida-portal-saude-marco"),
+            # 15/10/2026: o fluxo separado do DAVJV ("marco") usa a conta da Cora — testado: faturas e NF-e do DAVJV vêm
+            # pela Cora. Backup (conta do Vinicios): trocar por "hapvida-portal-saude-marco".
+            "marco": scraper.get_credentials(project, "hapvida-portal-saude"),
         }
         erros_lista += atualizar_faturas(creds)
         saude = contratos_saude(comp)

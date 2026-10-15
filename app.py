@@ -109,7 +109,7 @@ def run_davjv_marco():
     from datetime import date
 
     project = os.environ["GCP_PROJECT"]
-    creds = scraper.get_credentials(project, "hapvida-portal-saude-marco")
+    creds = scraper.get_credentials(project, "hapvida-portal-saude")  # 15/10/2026: Cora (backup: hapvida-portal-saude-marco)
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -198,7 +198,7 @@ def enviar_documentos_contrato(payload: EnvioDocumentos):
     pra outro codigo novo, o mesmo problema pode se repetir - conferir
     qual conta realmente enxerga o contrato antes de assumir Carol."""
     project = os.environ["GCP_PROJECT"]
-    secret_id = "hapvida-portal-saude-marco" if payload.codigo.upper() == "DAVJV" else "hapvida-portal-saude"  # 15/10: B6PJX na Cora; DAVJV financeiro no backup
+    secret_id = "hapvida-portal-saude"  # 15/10/2026: tudo na Cora (DAVJV/B6PJX testados); backup: hapvida-portal-saude-marco
     creds = scraper.get_credentials(project, secret_id)
     return enviar_documentos.montar_e_enviar(
         payload.codigo.upper(), payload.destinatario, project, creds["usuario"], creds["senha"],

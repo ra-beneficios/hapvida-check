@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Copia a conta do PORTAL MODERNO (Portal Empresas Saúde) do Bitwarden pro cofre de máquina, segredo
 `hapvida-portal-saude` = {usuario, senha, portal}. É a conta que todo o servidor usa (coleta, uploads, vigia,
-faturamento) — exceto a parte FINANCEIRA do DAVJV, que segue na conta do Vinicios (`hapvida-portal-saude-marco`, backup)
-enquanto a Cora não tiver o financeiro desse contrato.
+faturamento), inclusive DAVJV/B6PJX desde 15/10. A conta do Vinicios (`hapvida-portal-saude-marco`) fica de backup.
 
 15/10/2026 (André): a conta do sistema passa a ser a da Cora (master de todos os contratos); a da Carol virou
 administradora e fica só pra uso humano. Trocar a conta do sistema = mudar ITEM abaixo, nada mais.
