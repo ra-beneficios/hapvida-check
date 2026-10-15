@@ -364,6 +364,14 @@ def processar_linha(cur, linha: dict) -> None:
     # Motor de Exclusao (03/10): o mesmo acompanhamento serve para exclusao - o nome do arquivo diz o tipo.
     nome_arquivo = linha.get("nome_arquivo") or ""
     tipo = "exclusão" if nome_arquivo.upper().startswith("EXCLUSAO_") else "inclusão"
+    # PROCESSO_INCLUSAO_HAPVIDA.md (15/10/2026), passos 10–12: na inclusão o vigia não avisa o pós-vendas (o motor trata
+    # e o card final vem do vigia da inclusão); falha técnica vai pro André.
+    silencio = tipo == "inclusão"
+
+    def avisar(texto: str, falha: bool = False) -> bool:
+        if not silencio:
+            return notificar(solicitante_upn, texto)
+        return notificar(ADMIN_UPN, texto) if falha else True
     proxima_onda = (
         ("\n\nA onda dos **titulares** terminou — se houver onda 2 (dependentes), eu envio agora e te aviso o protocolo."
          if ONDA2_AUTOMATICA else
@@ -381,11 +389,11 @@ def processar_linha(cur, linha: dict) -> None:
                    WHERE id = %s""",
                 (linha["id"],),
             )
-            notificar(
-                solicitante_upn,
+            avisar(
                 f"⚠️ A {tipo} do {identificador} não apareceu na lista de movimentações do "
                 f"portal Hapvida depois de 45 minutos — algo deu errado no upload. Precisa "
                 f"verificar direto no portal ou tentar reenviar.",
+                falha=True,
             )
             return
 
@@ -404,8 +412,7 @@ def processar_linha(cur, linha: dict) -> None:
             extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, movimento.get("controlCode"), None)
             if status_raw in STATUS_COM_CRITICA and _rodar_ciclo(cur, linha, movimento.get("controlCode")):
                 return
-            if not notificar(
-                solicitante_upn,
+            if not avisar(
                 f"✅ A {tipo} do {identificador} já processou no portal Hapvida — status: "
                 f"**{status_legivel}**. Se precisar do relatório detalhado de críticas, me avisa "
                 f"que eu busco." + extra_recusas + _datas_exclusao(linha) + proxima_onda,
@@ -420,8 +427,7 @@ def processar_linha(cur, linha: dict) -> None:
                    WHERE id = %s""",
                 (status_raw, linha["id"]),
             )
-            notificar(
-                solicitante_upn,
+            avisar(
                 f"✅ A {tipo} do {identificador} subiu com sucesso e está **em movimentação** "
                 f"no portal Hapvida. Em até 12h eu confiro de novo e te mando o relatório de "
                 f"críticas, se houver.",
@@ -436,10 +442,10 @@ def processar_linha(cur, linha: dict) -> None:
                    WHERE id = %s""",
                 (linha["id"],),
             )
-            notificar(
-                solicitante_upn,
+            avisar(
                 f"⚠️ Depois de 12h, a {tipo} do {identificador} ainda não aparece na lista de "
                 f"movimentações do portal — precisa verificar.",
+                falha=True,
             )
             return
 
@@ -485,7 +491,7 @@ def processar_linha(cur, linha: dict) -> None:
         )
         if not vidas:
             texto += "Nenhuma vida com crítica ou cancelamento — tudo processou certinho. ✅" + extra_recusas + proxima_onda
-            entregue = notificar(solicitante_upn, texto)
+            entregue = avisar(texto)
         else:
             # 13/10 (Raphael, C-MMIND): numa EXCLUSAO o relatorio lista as vidas canceladas - isso e' o sucesso, nao
             # critica. O aviso dizia "⚠️ 101 vida(s) com critica" e nao falava da onda 2; os dependentes ficaram 4 dias.
@@ -494,12 +500,12 @@ def processar_linha(cur, linha: dict) -> None:
                           + extra_recusas + proxima_onda)
             else:
                 texto += f"⚠️ {len(vidas)} vida(s) com crítica ou cancelamento — relatório completo no anexo." + extra_recusas
-            entregue = notificar_com_relatorio(codigo_contrato, control_code, vidas, solicitante_upn, texto)
+            entregue = notificar_com_relatorio(codigo_contrato, control_code, vidas, ADMIN_UPN if silencio else solicitante_upn, texto)
             if not entregue:
                 # #156 - fallback: se o relatorio XLSX falhar por qualquer motivo, nao deixa o
                 # solicitante sem nada - manda o texto corrido mesmo (pior formato, mas melhor
                 # que silencio)
-                entregue = notificar(solicitante_upn, texto + "\n\n(não consegui gerar o arquivo agora, avisando por texto)")
+                entregue = avisar(texto + "\n\n(não consegui gerar o arquivo agora, avisando por texto)", falha=True)
         if not entregue:
             _reagendar_por_entrega(cur, linha)
 

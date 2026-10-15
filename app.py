@@ -335,6 +335,22 @@ def ciclo_aprovar(p: CicloAprovar):
     return _ciclo(ciclo_criticas.aprovar, p.execucao_id, p.escopo, p.aprovado_por)
 
 
+class InclusaoDecisao(BaseModel):
+    inclusao_id: int
+    acao: str
+    por: str
+
+
+@app.post("/inclusao/decisao")
+def inclusao_decisao(p: InclusaoDecisao):
+    """PROCESSO_INCLUSAO_HAPVIDA.md (15/10/2026), passo 17: Continuar incluindo / Finalizar / Quero o arquivo."""
+    import ciclo_inclusao
+    try:
+        return ciclo_inclusao.decidir(p.inclusao_id, p.acao, p.por)
+    except ciclo_inclusao.Recusa as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 @app.post("/ciclo/descartar")
 def ciclo_descartar(p: CicloDescartar):
     return _ciclo(ciclo_criticas.descartar, p.execucao_id, p.por)
