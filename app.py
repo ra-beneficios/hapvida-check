@@ -345,6 +345,8 @@ class ConsultarCpfs(BaseModel):
     contrato: str
     cpfs: list[str]
     enderecos: list[dict] = []   # 14/10: com endereços, devolve também life-data e CEPs conferidos (enriquecer)
+    cpfs_invalidos: list[str] = []   # 15/10: CPF digitado errado -> life-data das variações válidas
+    grupo: dict[str, list[str]] = {}  # 15/10: {outro_contrato: [cpf]} -> situação lá (ativo/cancelamento) = transferência?
 
 
 @app.post("/inclusao/consultar-cpfs")
@@ -359,7 +361,12 @@ def inclusao_consultar_cpfs(p: ConsultarCpfs):
         raise HTTPException(status_code=409, detail="contrato ou lista de CPFs inválida")
     try:
         with ciclo_criticas.coleta_portal.sessao(contrato) as (page, headers):
-            return ciclo_criticas.coleta_portal.enriquecer(page, headers, contrato, cpfs, p.enderecos[:500])
+            r = ciclo_criticas.coleta_portal.enriquecer(page, headers, contrato, cpfs, p.enderecos[:500], p.cpfs_invalidos[:200])
+        # outro contrato = outra sessão, depois de fechar a principal (uma sessão por vez na mesma conta)
+        r["grupo"] = ciclo_criticas.coleta_portal.situacoes_no_grupo(
+            {c.strip().upper(): set(v) for c, v in list(p.grupo.items())[:10] if _re.fullmatch(r"[0-9A-Za-z]{5}", c.strip())}) \
+            if p.grupo else {}
+        return r
     except Exception as e:
         print(f"[inclusao/consultar-cpfs] {contrato}: sem consulta ao vivo: {type(e).__name__}: {e}")
         raise HTTPException(status_code=409, detail=f"sem acesso ao contrato {contrato} pela API da Hapvida")
