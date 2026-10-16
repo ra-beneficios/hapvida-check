@@ -280,7 +280,10 @@ def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> 
             with coleta_portal.sessao(contrato) as (page, headers):
                 conf = coleta_portal.conferir_antes_de_reenviar(page, headers, contrato, cpfs, desde, controles)
         except coleta_portal.ConferenciaInvalida as erro:
-            raise Recusa(f"não consegui conferir na Hapvida ({erro}) — sem conferência eu não subo nada. Tente de novo mais tarde.")
+            # 16/10/2026: nada subiu -> é seguro repetir; o cron do ciclo (retentar_reenvios) tenta de novo sozinho
+            _marcar_reenvio_pendente(conn_s, eid, escopo, aprovado_por, sistema, str(erro))
+            raise Recusa(f"não consegui conferir na Hapvida ({erro}) — sem conferência eu não subo nada. "
+                         "Vou tentar de novo sozinho a cada 30 minutos.")
         partes = []
         if conf["no_contrato"]:
             partes.append(f"{len(conf['no_contrato'])} já aparece(m) no contrato")
@@ -332,6 +335,56 @@ def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> 
                 "complemento": comp["linhas"] if comp else 0, "responsavel": comp["responsavel"]["nome"] if comp else None}
     finally:
         conn_s.close()
+
+
+MAX_RETENTATIVAS = 20   # ~10h de expediente com o cron de 30 em 30 min
+
+
+def _marcar_reenvio_pendente(conn_s, eid: int, escopo: str, por: str, sistema: bool, erro: str) -> None:
+    with conn_s.cursor() as cur:
+        cur.execute("SELECT contexto -> 'reenvio_pendente' FROM saneamento.execucao WHERE id = %s", (eid,))
+        ant = (cur.fetchone() or [None])[0] or {}
+        pend = {"escopo": escopo, "por": por, "sistema": sistema, "tentativas": int(ant.get("tentativas") or 0) + 1,
+                "ultimo_erro": erro[:300], "em": datetime.now().isoformat(timespec="seconds")}
+        cur.execute("""UPDATE saneamento.execucao SET contexto = coalesce(contexto, '{}'::jsonb) || jsonb_build_object('reenvio_pendente', %s::jsonb)
+                       WHERE id = %s""", (json.dumps(pend), eid))
+    conn_s.commit()
+
+
+def retentar_reenvios() -> list[dict]:
+    """Reenvios que pararam porque o portal não deixou conferir (nada subiu). Tenta de novo; sucesso limpa a marca;
+    depois de MAX_RETENTATIVAS avisa o André uma vez e para."""
+    conn_s = conectar_saneamento()
+    try:
+        with conn_s.cursor() as cur:
+            cur.execute("""SELECT id, contexto -> 'reenvio_pendente' FROM saneamento.execucao
+                            WHERE status = 'CONCLUIDA' AND contexto ? 'reenvio_pendente' ORDER BY id""")
+            pendentes = cur.fetchall()
+    finally:
+        conn_s.close()
+    feitos = []
+    for eid, pend in pendentes:
+        if int(pend.get("tentativas") or 0) >= MAX_RETENTATIVAS:
+            continue
+        try:
+            r = aprovar(eid, pend["escopo"], pend["por"], sistema=bool(pend.get("sistema")))
+        except Recusa as erro:
+            r = {"enviado": False, "erro": str(erro)}
+        print("[reenvio] execução", eid, json.dumps(r, default=str)[:300])
+        portal_fora = "não consegui conferir" in (r.get("erro") or "")
+        if not portal_fora:   # subiu, ou recusa definitiva (já no contrato / duplicado / já enviada): não repete
+            conn_s = conectar_saneamento()
+            try:
+                with conn_s, conn_s.cursor() as cur:
+                    cur.execute("UPDATE saneamento.execucao SET contexto = contexto - 'reenvio_pendente' WHERE id = %s", (eid,))
+            finally:
+                conn_s.close()
+        elif int(pend.get("tentativas") or 0) + 1 >= MAX_RETENTATIVAS:
+            _cora("/notificar", {"upn": ciclo.ADMIN,
+                                 "texto": f"⚠️ Reenvio da execução {eid} não subiu depois de {MAX_RETENTATIVAS} tentativas: "
+                                          f"{r.get('erro') or 'portal não confirmou'}"})
+        feitos.append({"execucao_id": eid, **r})
+    return feitos
 
 
 def descartar(eid: int, por: str) -> dict:

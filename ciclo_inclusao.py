@@ -281,7 +281,8 @@ def processar(cur, inc: dict, agora: datetime, simular: bool) -> None:
                            ultimo_lembrete_em = now() WHERE id = %s""", (inc["id"],))
         return
     base = _naive(inc["decisao_em"] if st == "CONTINUAR" and inc["decisao_em"] else inc["perguntada_em"]) or criada
-    dias = (agora - base).total_seconds() / 86400
+    # 16/10/2026 (André): os prazos de 4 e 7 dias são em dias ÚTEIS — dia útil = um expediente inteiro (seg–sex)
+    dias = horas_uteis(base, agora) / (EXPEDIENTE[1] - EXPEDIENTE[0])
     if dias >= DIAS_FINALIZA:
         return finalizar(cur, inc, "PRAZO", simular, avisar_gestor=True)
     if dias >= DIAS_GESTOR and not inc["gestor_avisado_em"]:
@@ -308,6 +309,12 @@ def _abertas(cur, inclusao_id: int | None = None) -> list[dict]:
 
 
 def run(simular: bool = False) -> None:
+    if not simular:
+        try:
+            import ciclo_criticas
+            ciclo_criticas.retentar_reenvios()
+        except Exception as e:
+            print(f"[reenvio] retentativa falhou: {type(e).__name__}: {e}")
     conn = _conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
