@@ -76,6 +76,8 @@ STATUS_COM_CRITICA = {"FileProcessedWithReview", "ProcessFileWithPendency"}
 CICLO_NO_VIGIA = os.environ.get("CICLO_NO_VIGIA") == "1"
 # 12h depois ainda processando: reagenda de 2 em 2h ate 36h do envio; depois disso segue com o que tiver
 REAGENDAR_ATE_HORAS = 36
+# "UnableToStart" depois disso = arquivo recusado (nos 7 casos vistos, nunca saiu desse status)
+RECUSADO_APOS_HORAS = 2
 
 
 def _rodar_ciclo(cur, linha: dict, control_code) -> bool:
@@ -454,6 +456,22 @@ def processar_linha(cur, linha: dict) -> None:
         control_code = movimento.get("controlCode")
 
         horas = (datetime.datetime.now() - enviado_em_naive).total_seconds() / 3600
+        if status_raw == "UnableToStart" and horas >= RECUSADO_APOS_HORAS:
+            # 16/10/2026 (achado real, 4DFEV 1332627 + 6 desde 04/09): "UnableToStart" que não sai disso em horas é
+            # o arquivo inteiro recusado pela Hapvida (campo inválido), não "transitório" — nenhuma vida entrou
+            cur.execute(
+                """UPDATE movimentacoes_hapvida_acompanhamento
+                   SET status = 'FALHOU', ultima_checagem_em = now(), notificado_em = now(),
+                       detalhe_status = 'arquivo recusado pela Hapvida (UnableToStart)'
+                   WHERE id = %s""",
+                (linha["id"],),
+            )
+            avisar(
+                f"⚠️ A {tipo} do {identificador} (protocolo {control_code}) foi recusada inteira pela Hapvida: "
+                f"o arquivo não começou a processar e nenhuma vida entrou. Precisa corrigir o arquivo e reenviar.",
+                falha=True,
+            )
+            return
         if CICLO_NO_VIGIA and status_raw not in STATUS_FINAIS_CONHECIDOS and horas < REAGENDAR_ATE_HORAS:
             cur.execute("""UPDATE movimentacoes_hapvida_acompanhamento
                            SET ultima_checagem_em = now(), detalhe_status = %s,
