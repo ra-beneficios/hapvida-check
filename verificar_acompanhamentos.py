@@ -120,6 +120,46 @@ def _reagendar_por_entrega(cur, linha: dict) -> None:
                    WHERE id = %s""", (linha["id"],))
 
 
+def _aviso_final_exclusao(avisar, contrato: str, nome_arquivo: str, recusas: str, linha: dict, meio_do_lote: bool) -> bool:
+    """Uma mensagem só, objetiva. No meio do lote (titulares com dependentes por vir) só sai se houve recusa."""
+    if meio_do_lote:
+        return avisar(f"⚠️ **Exclusão {contrato}**: a Hapvida recusou titulares (os dependentes seguem sozinhos)." + recusas)
+    n = _vidas_do_lote(nome_arquivo)
+    return avisar(f"✅ **Exclusão {contrato} concluída**" + (f": {n} vida(s) processadas pela Hapvida." if n else ".")
+                  + recusas + _datas_exclusao(linha))
+
+
+def _lote_exclusao(nome_arquivo: str) -> tuple[dict, str] | None:
+    """(estado do lote, contrato) do TXT de exclusão, ou None."""
+    try:
+        import exclusao_api
+        achado = exclusao_api.servico.contrato_do_envio(nome_arquivo, exclusao_api._pastas())
+        return (exclusao_api.servico.ler_estado(achado[0], exclusao_api._pastas()), achado[1]) if achado else None
+    except Exception as e:
+        print(f"[exclusao] nao li o lote de {nome_arquivo}: {e}")
+        return None
+
+
+def _onda2_pendente(nome_arquivo: str) -> bool:
+    """Titulares de um lote que ainda tem a onda dos dependentes aprovada para o mesmo contrato."""
+    if "_titulares_" not in nome_arquivo:
+        return False
+    lote = _lote_exclusao(nome_arquivo)
+    if not lote:
+        return False
+    estado, contrato = lote
+    aprovados = (estado.get("aprovacoes") or [{}])[-1].get("arquivos") or []
+    return any(a.get("onda") == "dependentes" and a.get("contrato") == contrato for a in aprovados)
+
+
+def _vidas_do_lote(nome_arquivo: str) -> int | None:
+    lote = _lote_exclusao(nome_arquivo)
+    if not lote:
+        return None
+    estado, contrato = lote
+    return sum(int(e.get("linhas") or 0) for e in estado.get("envios", []) if e.get("contrato") == contrato) or None
+
+
 def _enviar_onda2(cur, exclusao_api, lote_id: str, estado: dict, dep: dict) -> bool:
     """Envia a onda dos dependentes sozinho. -> True se subiu (entra no acompanhamento e avisa quem pediu).
     A tentativa fica gravada no lote: falhou uma vez, nao tenta de novo sozinho (vai pro lembrete com botao)."""
@@ -151,9 +191,6 @@ def _enviar_onda2(cur, exclusao_api, lote_id: str, estado: dict, dep: dict) -> b
         print(f"[onda2-auto] {lote_id}: enviada, mas nao registrei o acompanhamento: {e}")
         notificar(ADMIN_UPN, f"⚠️ Exclusão {dep['contrato']} (lote `{lote_id}`): onda 2 enviada (protocolo "
                              f"{r.get('protocolo')}), mas o acompanhamento não foi registrado — conferir à mão.")
-    notificar(upn, f"✅ **Exclusão {dep['contrato']}: enviei a onda 2 ({r['linhas']} dependentes)** — os titulares já "
-                   f"estavam processados. Protocolo **{r.get('protocolo') or 'a confirmar'}**. A Hapvida leva de 3 a 10 horas; "
-                   f"te aviso o resultado aqui.")
     print(f"[onda2-auto] {lote_id} {dep['contrato']}: onda 2 enviada, protocolo {r.get('protocolo')}")
     return True
 
@@ -369,6 +406,9 @@ def processar_linha(cur, linha: dict) -> None:
     # PROCESSO_INCLUSAO_HAPVIDA.md (15/10/2026), passos 10–12: na inclusão o vigia não avisa o pós-vendas (o motor trata
     # e o card final vem do vigia da inclusão); falha técnica vai pro André.
     silencio = tipo == "inclusão"
+    # 16/10/2026 (André, EXCLUSAO 8DAC9): exclusão também sem mensagens no meio do caminho — "subiu", "titulares
+    # processados", "enviei a onda 2" atrapalham. Só falha e o resultado final (depois da última onda do lote).
+    meio_do_lote = tipo == "exclusão" and _onda2_pendente(nome_arquivo)
 
     def avisar(texto: str, falha: bool = False) -> bool:
         if not silencio:
@@ -414,6 +454,10 @@ def processar_linha(cur, linha: dict) -> None:
             extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, movimento.get("controlCode"), None)
             if status_raw in STATUS_COM_CRITICA and _rodar_ciclo(cur, linha, movimento.get("controlCode")):
                 return
+            if tipo == "exclusão":
+                if not (meio_do_lote and not extra_recusas):
+                    _aviso_final_exclusao(avisar, codigo_contrato, nome_arquivo, extra_recusas, linha, meio_do_lote)
+                return
             if not avisar(
                 f"✅ A {tipo} do {identificador} já processou no portal Hapvida — status: "
                 f"**{status_legivel}**. Se precisar do relatório detalhado de críticas, me avisa "
@@ -429,11 +473,12 @@ def processar_linha(cur, linha: dict) -> None:
                    WHERE id = %s""",
                 (status_raw, linha["id"]),
             )
-            avisar(
-                f"✅ A {tipo} do {identificador} subiu com sucesso e está **em movimentação** "
-                f"no portal Hapvida. Em até 12h eu confiro de novo e te mando o relatório de "
-                f"críticas, se houver.",
-            )
+            if tipo != "exclusão":
+                avisar(
+                    f"✅ A {tipo} do {identificador} subiu com sucesso e está **em movimentação** "
+                    f"no portal Hapvida. Em até 12h eu confiro de novo e te mando o relatório de "
+                    f"críticas, se houver.",
+                )
 
     elif status_atual == "AGUARDANDO_CHECAGEM_RELATORIO":
         if not movimento:
@@ -502,6 +547,12 @@ def processar_linha(cur, linha: dict) -> None:
             (status_raw, linha["id"]),
         )
 
+        if tipo == "exclusão":
+            recusas = _registrar_recusas_exclusao(linha, codigo_contrato, control_code, vidas)
+            if not (meio_do_lote and not recusas):
+                if not _aviso_final_exclusao(avisar, codigo_contrato, nome_arquivo, recusas, linha, meio_do_lote):
+                    _reagendar_por_entrega(cur, linha)
+            return
         extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, control_code, vidas) + _datas_exclusao(linha)
         texto = (
             f"📋 Resultado final da {tipo} do {identificador}, 12h depois do envio: "

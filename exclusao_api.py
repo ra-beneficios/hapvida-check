@@ -53,11 +53,19 @@ def _pedidos_cancelamento(auth: dict, contrato: str) -> dict:
     ini = fim - timedelta(days=179)
     itens, off = [], 0
     while True:
-        r = httpx.get(f"{API}/movements/status/partner-company/{contrato}/operation-types",
-                      headers=censo_saude._headers_http(auth), timeout=60,
-                      params={"start-date": ini.isoformat(), "end-date": fim.isoformat(),
-                              "operation-types": "CancellationExclusion", "offset": off, "limit": 100})
-        r.raise_for_status()
+        # 16/10/2026 (G3W63, André): a Hapvida devolveu 400 uma vez nesta consulta e no minuto seguinte respondeu
+        # normal — instabilidade dela. Tenta 3x antes de desistir; se desistir, a mensagem diz que foi a Hapvida.
+        for tentativa in range(3):
+            r = httpx.get(f"{API}/movements/status/partner-company/{contrato}/operation-types",
+                          headers=censo_saude._headers_http(auth), timeout=60,
+                          params={"start-date": ini.isoformat(), "end-date": fim.isoformat(),
+                                  "operation-types": "CancellationExclusion", "offset": off, "limit": 100})
+            if r.is_success:
+                break
+            time.sleep(10 * (tentativa + 1))
+        else:
+            raise PendenciaAprovacao(f"a Hapvida não respondeu à consulta de cancelamentos do {contrato} "
+                                     f"(HTTP {r.status_code}, 3 tentativas) — instabilidade dela; tente de novo em alguns minutos")
         cont = r.json().get("content") or {}
         lote = cont.get("movements") or []
         itens += lote
