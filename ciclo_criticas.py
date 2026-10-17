@@ -469,7 +469,15 @@ def _gravar_json(caminho: Path, dados) -> None:
 
 
 def guardar_respostas(res: dict, quem: str, arquivo: str) -> None:
-    """Mescla as respostas no pos_vendas.json de cada movimentação e na memória por CPF."""
+    """Mescla as respostas no pos_vendas.json de cada movimentação e na memória por CPF (com trava: duas correções
+    ao mesmo tempo não podem perder resposta — achado da mesa de arquitetura, 17/10)."""
+    import fcntl
+    with open(DADOS / ".respostas.lock", "w") as trava:
+        fcntl.flock(trava, fcntl.LOCK_EX)
+        _guardar_respostas(res, quem, arquivo)
+
+
+def _guardar_respostas(res: dict, quem: str, arquivo: str) -> None:
     agora = datetime.now().astimezone().isoformat(timespec="seconds")
     memoria = json.loads(ARQ_MEMORIA.read_text()) if ARQ_MEMORIA.exists() else {}
     for (contrato, mov), regs in res["respostas"].items():
@@ -487,10 +495,13 @@ def guardar_respostas(res: dict, quem: str, arquivo: str) -> None:
                 linha = layout.gravar(linha, campo, v)
             cpf = layout.ler(linha, "108") if linha else ""
             if cpf:
+                # 17/10/2026 (mesa LGPD): só dado de identificação/endereço da pessoa (minimização), com origem e data;
+                # vale 12 meses (ciclo.ler_memoria ignora o vencido)
                 m = memoria.setdefault(cpf, {})
                 for campo in list(r["campos"]) + list(r["confirmados"]):
-                    if campo not in ("101", "132a", "117", "119", "132d"):   # dado da pessoa, não da movimentação
-                        m[campo] = layout.ler(linha, campo)
+                    if campo in ciclo.CAMPOS_MEMORIA:
+                        m[campo] = {"valor": layout.ler(linha, campo), "contrato": contrato, "movimentacao": mov,
+                                    "em": agora, "quem": quem}
         atual["historico"].append({"em": agora, "quem": quem, "arquivo": arquivo, "linhas": sorted(regs)})
         _gravar_json(f, atual)
     _gravar_json(ARQ_MEMORIA, memoria)
