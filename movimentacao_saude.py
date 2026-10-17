@@ -113,6 +113,8 @@ def enviar_movimentacao(usuario: str, senha: str, codigo_contrato: str, arquivo_
 
         page.on("response", on_response)
 
+        import portal_vez
+        portal_vez.registrar("LOGIN", codigo_contrato)   # obra 3 (observando): login do envio pela tela
         page.goto(LOGIN_URL, timeout=30000)
         page.wait_for_load_state("networkidle", timeout=20000)
         page.fill("#email", usuario)
@@ -256,6 +258,8 @@ def _capturar_headers_api(page) -> dict:
 
 
 def _login_e_capturar_headers(page, usuario: str, senha: str, codigo_contrato: str) -> dict:
+    import portal_vez
+    portal_vez.registrar("LOGIN", codigo_contrato)   # obra 3 (observando)
     page.goto(LOGIN_URL, timeout=30000)
     page.wait_for_load_state("networkidle", timeout=20000)
     page.fill("#email", usuario)
@@ -300,6 +304,8 @@ def _proteger_contrato(page, codigo_contrato: str, tentativas: int = 2) -> None:
                 if not trocado:
                     return r
                 print(f"[sessao] contrato {codigo_contrato} trocado por outra sessão da mesma conta - selecionando de novo")
+                import portal_vez
+                portal_vez.registrar("RESELECAO", codigo_contrato)
                 _localizar_e_entrar_no_contrato(page, codigo_contrato)
                 r = original(*a, **k)
             return r
