@@ -40,6 +40,11 @@ class RelatorioTimeoutError(Exception):
 
 
 def login_saude(page, usuario: str, senha: str) -> dict:
+    try:
+        import portal_vez
+        portal_vez.registrar("LOGIN")   # obra 3 (observando)
+    except Exception:
+        pass
     """Login via Azure B2C (#email/#password/#next, confirmado no #54/#56).
     Captura Authorization e Ocp-Apim-Subscription-Key da primeira chamada
     autenticada pra api.hapvida.com.br, pra reaproveitar via httpx depois
