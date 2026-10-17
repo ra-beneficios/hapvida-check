@@ -7,7 +7,8 @@ Cada inclusão feita pela Cora fica em saneamento.inclusao até cada vida estar 
   - quando nada mais está em andamento no contrato (o motor esgotou) e ainda falta vida, pergunta ao pós-vendas:
     Continuar incluindo / Finalizar (passo 17);
   - Continuar: lembrete a cada 8h úteis, com o lote/protocolo e "Quero o arquivo";
-  - 4 dias sem resposta: pergunta de novo com cópia ao gestor do pós-vendas; 7 dias: finaliza sozinho e avisa os dois.
+  - prazo de 30 dias do evento (17/10/2026): gestor em cópia 10 dias antes; só finaliza depois do prazo vencer
+    (sem data de evento no arquivo: 4 dias úteis sem resposta -> gestor; 7 -> finaliza).
 A decisão do cartão chega por app.py /inclusao/decisao -> decidir().
 
 Uso: python3 ciclo_inclusao.py [--simular]   (--simular: só mostra o que faria, não manda nada nem grava)
@@ -27,6 +28,7 @@ from openpyxl import load_workbook
 
 sys.path.insert(0, os.environ.get("SANEAMENTO_PATH", "/lifetools_service"))
 from saneamento import coleta_portal  # noqa: E402
+from saneamento.regras_inclusao import prazo_evento  # noqa: E402
 from saneamento.texto import normalizar  # noqa: E402
 
 CORA = os.environ.get("CORA_BASE_URL", "http://cora:3978")
@@ -36,7 +38,8 @@ SAIDAS = Path(os.environ.get("SAIDA_MOTOR", "/dados_motor/_saidas"))
 CONFERIR_A_CADA = timedelta(hours=2)
 PRIMEIRA_CONFERENCIA = timedelta(hours=1)
 LEMBRETE_HORAS_UTEIS = 8
-DIAS_GESTOR, DIAS_FINALIZA = 4, 7
+DIAS_GESTOR, DIAS_FINALIZA = 4, 7   # sem data de evento no arquivo (fallback)
+AVISO_GESTOR_ANTES_DO_PRAZO = 10    # 17/10/2026 (André): gestor avisado 10 dias antes do fim do prazo de 30 dias do evento
 EXPEDIENTE = (8, 18)            # horário comercial: seg–sex, 8h–18h
 PLANO_ODONTO = "9732"           # 117 do Odonto (regra do André, 24/09)
 FINAIS_ACOMPANHAMENTO = ("CONCLUIDO", "FALHOU")
@@ -100,6 +103,43 @@ def _linhas_xlsx(xlsx: bytes) -> tuple[list, list[list], int, dict]:
             idx[cod] = n
     linhas = [[c.value for c in r] for r in ws.iter_rows(min_row=2) if any(c.value not in (None, "") for c in r)]
     return cab, linhas, 0, idx
+
+
+def _aaaammdd(v) -> str:
+    if hasattr(v, "strftime"):
+        return v.strftime("%Y%m%d")
+    s = str(v or "").strip()
+    if len(s) == 10 and s[2] == "/" and s[5] == "/":
+        return s[6:] + s[3:5] + s[:2]
+    return "".join(ch for ch in s if ch.isdigit())[:8]
+
+
+def prazos(inc: dict) -> dict:
+    """{cpf: fim do prazo de 30 dias do evento} das vidas da inclusão (17/10/2026: a fila anda pelo prazo)."""
+    if not inc.get("xlsx_completo"):
+        return {}
+    try:
+        _, linhas, _, idx = _linhas_xlsx(bytes(inc["xlsx_completo"]))
+    except Exception:
+        return {}
+    pega = lambda l, c: l[idx[c]] if c in idx and idx[c] < len(l) else None  # noqa: E731
+    pessoas = []
+    for l in linhas:
+        cpf = "".join(ch for ch in str(pega(l, "108") or "") if ch.isdigit()).zfill(11)
+        tit = "".join(ch for ch in str(pega(l, "132c") or "") if ch.isdigit()).zfill(11)
+        rel = str(pega(l, "120") or "").strip().zfill(2)
+        pessoas.append({"108": cpf, "132c": tit, "120": rel, "106": _aaaammdd(pega(l, "106")),
+                        "132d": _aaaammdd(pega(l, "132d")), "132e": _aaaammdd(pega(l, "132e"))})
+    tits = {p["108"]: p for p in pessoas if p["120"] == "01"}
+    return {p["108"]: d for p in pessoas if (d := prazo_evento(p, tits.get(p["132c"])))}
+
+
+def _texto_prazo(inc: dict, pendentes: set) -> str:
+    pz = sorted(d for c, d in prazos(inc).items() if c in pendentes)
+    if not pz:
+        return ""
+    dias = (pz[0] - datetime.now().date()).days
+    return f"Prazo mais curto: {pz[0]:%d/%m} (" + (f"faltam {dias} dia(s)" if dias >= 0 else f"vencido há {-dias} dia(s)") + ")."
 
 
 def _xlsx_de(cab: list, linhas: list[list]) -> bytes:
@@ -176,9 +216,10 @@ def _rotulo(inc: dict) -> str:
     return f"lote/protocolo {inc['protocolo'] or inc['id']} ({inc['contrato']})"
 
 
-def cartao_pergunta(inc: dict, faltam: int) -> dict:
+def cartao_pergunta(inc: dict, faltam: int, prazo_txt: str = "") -> dict:
     return {"type": "AdaptiveCard", "version": "1.4", "body": [
-        _txt(f"**Faltam {faltam} vida(s) do {_rotulo(inc)}**", size="Medium"),
+        _txt(f"**Faltam {faltam} vida(s) do {_rotulo(inc)}**", size="Medium")]
+        + ([_txt(prazo_txt)] if prazo_txt else []) + [
         _txt("Quer continuar incluindo neste arquivo ou finalizar e mandar essas vidas em outro arquivo depois?")],
         "actions": [
             {"type": "Action.Submit", "title": "Continuar incluindo", "data": {"acao": "inclusao.continuar", "inclusao_id": inc["id"]}},
@@ -186,9 +227,9 @@ def cartao_pergunta(inc: dict, faltam: int) -> dict:
             {"type": "Action.Submit", "title": "Quero o arquivo", "data": {"acao": "inclusao.arquivo", "inclusao_id": inc["id"]}}]}
 
 
-def cartao_lembrete(inc: dict, faltam: int) -> dict:
+def cartao_lembrete(inc: dict, faltam: int, prazo_txt: str = "") -> dict:
     return {"type": "AdaptiveCard", "version": "1.4", "body": [
-        _txt(f"⏳ **{_rotulo(inc)}**: ainda faltam {faltam} vida(s) esperando correção."),
+        _txt(f"⏳ **{_rotulo(inc)}**: ainda faltam {faltam} vida(s) esperando correção." + (f" {prazo_txt}" if prazo_txt else "")),
         _txt("Quer o arquivo com o que corrigir?")],
         "actions": [
             {"type": "Action.Submit", "title": "Quero o arquivo", "data": {"acao": "inclusao.arquivo", "inclusao_id": inc["id"]}},
@@ -269,7 +310,8 @@ def processar(cur, inc: dict, agora: datetime, simular: bool) -> None:
             if not simular:
                 cur.execute("UPDATE saneamento.inclusao SET ativas = %s, ultima_conferencia_em = now() WHERE id = %s",
                             (json.dumps(inc["ativas"]), inc["id"]))
-    faltam = len({v["cpf"] for v in inc["vidas"] if v.get("cpf")} - set(inc["ativas"]))
+    pendentes = {v["cpf"] for v in inc["vidas"] if v.get("cpf")} - set(inc["ativas"])
+    faltam = len(pendentes)
     if faltam == 0:
         return finalizar(cur, inc, "TODAS_ATIVAS", simular)
     if not no_expediente(agora) or em_andamento(cur, inc):
@@ -278,29 +320,35 @@ def processar(cur, inc: dict, agora: datetime, simular: bool) -> None:
     if st == "ABERTA":
         print(f"[inclusao {inc['id']}] pergunta Continuar/Finalizar (faltam {faltam})")
         if not simular and _cora("/notificar-cartao", {"upn": inc["solicitante_upn"], "texto": f"Faltam {faltam} vida(s) do {_rotulo(inc)}",
-                                                     "cartao": cartao_pergunta(inc, faltam)}):
+                                                     "cartao": cartao_pergunta(inc, faltam, _texto_prazo(inc, pendentes))}):
             cur.execute("""UPDATE saneamento.inclusao SET status = 'PERGUNTADA', perguntada_em = now(),
                            ultimo_lembrete_em = now() WHERE id = %s""", (inc["id"],))
         return
     base = _naive(inc["decisao_em"] if st == "CONTINUAR" and inc["decisao_em"] else inc["perguntada_em"]) or criada
     # 16/10/2026 (André): os prazos de 4 e 7 dias são em dias ÚTEIS — dia útil = um expediente inteiro (seg–sex)
     dias = horas_uteis(base, agora) / (EXPEDIENTE[1] - EXPEDIENTE[0])
-    if dias >= DIAS_FINALIZA:
+    # 17/10/2026 (André): com data de evento no arquivo, o relógio é o prazo de 30 dias do evento — não encerra antes
+    # dele vencer e avisa o gestor 10 dias antes; sem data, vale o de sempre (4 e 7 dias úteis sem resposta)
+    pz = sorted(d for c, d in prazos(inc).items() if c in pendentes)
+    hoje = agora.date()
+    vencido = (hoje > pz[-1]) if pz else dias >= DIAS_FINALIZA
+    perto = ((pz[0] - hoje).days <= AVISO_GESTOR_ANTES_DO_PRAZO) if pz else dias >= DIAS_GESTOR
+    if vencido and dias >= DIAS_FINALIZA:
         return finalizar(cur, inc, "PRAZO", simular, avisar_gestor=True)
-    if dias >= DIAS_GESTOR and not inc["gestor_avisado_em"]:
+    if perto and not inc["gestor_avisado_em"]:
         gestor = _gestor(cur)
-        print(f"[inclusao {inc['id']}] 4 dias sem resposta: pergunta de novo com cópia ao gestor ({bool(gestor)})")
+        print(f"[inclusao {inc['id']}] perto do prazo/sem resposta: pergunta de novo com cópia ao gestor ({bool(gestor)})")
         if not simular:
             for upn in filter(None, dict.fromkeys([inc["solicitante_upn"], gestor])):
-                _cora("/notificar-cartao", {"upn": upn, "texto": f"Sem resposta há {DIAS_GESTOR} dias — {_rotulo(inc)}",
-                                            "cartao": cartao_pergunta(inc, faltam)})
+                _cora("/notificar-cartao", {"upn": upn, "texto": f"Pendente — {_rotulo(inc)}",
+                                            "cartao": cartao_pergunta(inc, faltam, _texto_prazo(inc, pendentes))})
             cur.execute("UPDATE saneamento.inclusao SET gestor_avisado_em = now(), ultimo_lembrete_em = now() WHERE id = %s",
                         (inc["id"],))
         return
     if st == "CONTINUAR" and horas_uteis(_naive(inc["ultimo_lembrete_em"]) or base, agora) >= LEMBRETE_HORAS_UTEIS:
         print(f"[inclusao {inc['id']}] lembrete (faltam {faltam})")
         if not simular and _cora("/notificar-cartao", {"upn": inc["solicitante_upn"], "texto": f"Lembrete — {_rotulo(inc)}",
-                                                     "cartao": cartao_lembrete(inc, faltam)}):
+                                                     "cartao": cartao_lembrete(inc, faltam, _texto_prazo(inc, pendentes))}):
             cur.execute("UPDATE saneamento.inclusao SET ultimo_lembrete_em = now() WHERE id = %s", (inc["id"],))
 
 
