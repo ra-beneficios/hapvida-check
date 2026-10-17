@@ -201,7 +201,9 @@ def cartao_final(inc: dict, ativas: int, encerradas: int, odonto: bool) -> dict:
               + ([{"title": "Encerradas sem inclusão", "value": str(encerradas)}] if encerradas else [])}]
     if inc["casamentos"]:
         corpo.append(_txt("**Data de casamento trocada para a inclusão** (atualize com a data correta):", spacing="Medium"))
-        corpo += [_txt(f"• {c['nome']} — {c['antiga'] or 'em branco'} → {c['nova']}", spacing="None") for c in inc["casamentos"]]
+        corpo += [_txt(f"• {c['nome']} — {c['antiga'] or 'em branco'} → {c['nova']}", spacing="None") for c in inc["casamentos"][:5]]
+        if len(inc["casamentos"]) > 5:   # 17/10/2026: cartão curto; a lista completa está no arquivo da inclusão
+            corpo.append(_txt(f"… e mais {len(inc['casamentos']) - 5}.", spacing="None"))
     if odonto:
         corpo.append(_txt("🦷 **Odonto Premium**: [baixar o TXT das vidas ativas]({{LINK}})", spacing="Medium"))
     return {"type": "AdaptiveCard", "version": "1.4", "body": corpo}

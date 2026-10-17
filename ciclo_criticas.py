@@ -33,7 +33,7 @@ import requests
 import movimentacao_saude as ms
 
 sys.path.insert(0, os.environ.get("SANEAMENTO_PATH", "/lifetools_service"))
-from saneamento import ciclo, coleta_portal, persistencia  # noqa: E402
+from saneamento import ciclo, coleta_portal, correcao, layout, persistencia  # noqa: E402
 from saneamento.catalogo import classificar  # noqa: E402
 from saneamento.cli import conectar as conectar_saneamento  # noqa: E402
 from saneamento.ferramentas import coletar_ceps  # noqa: E402
@@ -44,6 +44,15 @@ STATUS_FINAIS = {"FileProcessed", "FileProcessedWithReview", "ProcessFileWithPen
 STATUS_PT = {"FileProcessed": "Processado sem críticas", "FileProcessedWithReview": "Finalizado com críticas",
              "ProcessFileWithPendency": "Processamento com pendência", "ProcessFile": "Em processamento",
              "UnableToStart": "Ainda não iniciou"}
+
+
+def linhas_que_derrubam(conteudo: bytes) -> list[str]:
+    """Portão do layout de inclusão (829 posições) — ver saneamento.layout.portao_upload."""
+    out = []
+    for i, l in enumerate(conteudo.decode("latin-1").splitlines(), 1):
+        if l.strip():
+            out += [f"linha {i}: {e}" for e in layout.portao_upload(l)]
+    return out
 
 
 class Recusa(Exception):
@@ -114,7 +123,8 @@ def rodar(contrato: str, controles: list[str], contexto: dict, notificar: bool =
     try:
         if coletadas:
             coletar_ceps.coletar(pasta_contrato, conn_l)
-        resumos = [ciclo.executar_ciclo(str(p), conn_l, conn_s, contexto) for _, p in coletadas]
+        por_mov = contexto.get("escopo_por_mov") or {}
+        resumos = [ciclo.executar_ciclo(str(p), conn_l, conn_s, {**contexto, "escopo": por_mov.get(cc)}) for cc, p in coletadas]
         resumos += [_ciclo_exclusao(contrato, cc, p, conn_l, contexto.get("solicitante")) for cc, p in exclusoes]
     finally:
         conn_l.close()
@@ -270,6 +280,9 @@ def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> 
             raise Recusa(f"não há carga {escopo} nessa análise")
         linhas = [l for l in row[0].splitlines() if l]
         contrato = e["contrato"]
+        ruins = linhas_que_derrubam("".join(l + "\n" for l in linhas).encode("latin-1"))
+        if ruins:   # 17/10/2026: nunca sobe o que derruba o arquivo inteiro
+            raise Recusa("o reenvio tem linha que a Hapvida recusaria inteira: " + "; ".join(ruins[:3]))
         # reconfere no portal: alguém da carga já está no contrato, num arquivo mais novo (mesmo processando) ou
         # num pedido via tela? Qualquer um -> não sobe. Consulta que falha -> não sobe.
         cpfs = {l[119:130].strip() for l in linhas}
@@ -448,3 +461,176 @@ def do_acompanhamento(linha: dict, control_code) -> list[dict]:
     return rodar(linha["codigo_contrato"], [str(control_code)],
                  {"origem": tipo, "solicitante": linha.get("solicitante_upn"), "rodada": linha.get("rodada") or 1,
                   "acompanhamento_id": linha["id"]})
+
+
+# ── volta da planilha de correção do pós-vendas (17/10/2026) ─────────────────────────────────────────
+# André: "arquivos de correção vazios na aba Correções e com informação na aba Ação no portal que a Cora nem você
+# acionam o MOTOR"; "não estamos usando nossa inteligência para aprender com as respostas". Antes, a volta era um
+# caminho à parte (só aplicava o que a pessoa digitou na aba Correções). Agora: as respostas (as duas abas) viram
+# FONTE do motor e ficam guardadas (na movimentação e por CPF); o motor roda de novo com coleta nova na Hapvida,
+# reenvia sozinho o que ficou certo e devolve uma planilha só com o que ainda trava.
+ARQ_MEMORIA = DADOS / ciclo.ARQ_MEMORIA
+
+
+def _gravar_json(caminho: Path, dados) -> None:
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    tmp = caminho.with_suffix(".tmp")
+    tmp.write_text(json.dumps(dados, ensure_ascii=False, indent=1))
+    os.chmod(tmp, 0o600)
+    tmp.replace(caminho)
+
+
+def guardar_respostas(res: dict, quem: str, arquivo: str) -> None:
+    """Mescla as respostas no pos_vendas.json de cada movimentação e na memória por CPF (com trava: duas correções
+    ao mesmo tempo não podem perder resposta — achado da mesa de arquitetura, 17/10)."""
+    import fcntl
+    with open(DADOS / ".respostas.lock", "w") as trava:
+        fcntl.flock(trava, fcntl.LOCK_EX)
+        _guardar_respostas(res, quem, arquivo)
+
+
+def _guardar_respostas(res: dict, quem: str, arquivo: str) -> None:
+    agora = datetime.now().astimezone().isoformat(timespec="seconds")
+    memoria = json.loads(ARQ_MEMORIA.read_text()) if ARQ_MEMORIA.exists() else {}
+    for (contrato, mov), regs in res["respostas"].items():
+        pasta = DADOS / contrato / mov
+        f = pasta / ciclo.ARQ_RESPOSTAS
+        atual = json.loads(f.read_text()) if f.exists() else {"respostas": {}, "historico": []}
+        originais = {l[:7]: l for l in (pasta / "original.txt").read_bytes().decode("latin-1").splitlines()}
+        for seq, r in regs.items():
+            a = atual["respostas"].setdefault(seq, {"campos": {}, "confirmados": [], "feito": False})
+            a["campos"].update(r["campos"])
+            a["confirmados"] = sorted(set(a["confirmados"]) | set(r["confirmados"]))
+            a["feito"] = a["feito"] or r["feito"]
+            linha = originais.get(seq, "")
+            for campo, v in a["campos"].items():
+                linha = layout.gravar(linha, campo, v)
+            cpf = layout.ler(linha, "108") if linha else ""
+            if cpf:
+                # 17/10/2026 (mesa LGPD): só dado de identificação/endereço da pessoa (minimização), com origem e data;
+                # vale 12 meses (ciclo.ler_memoria ignora o vencido)
+                m = memoria.setdefault(cpf, {})
+                for campo in list(r["campos"]) + list(r["confirmados"]):
+                    if campo in ciclo.CAMPOS_MEMORIA:
+                        m[campo] = {"valor": layout.ler(linha, campo), "contrato": contrato, "movimentacao": mov,
+                                    "em": agora, "quem": quem}
+        atual["historico"].append({"em": agora, "quem": quem, "arquivo": arquivo, "linhas": sorted(regs)})
+        _gravar_json(f, atual)
+    _gravar_json(ARQ_MEMORIA, memoria)
+
+
+def _ja_recebida(sha: str):
+    conn_s = conectar_saneamento()
+    try:
+        with conn_s.cursor() as cur:
+            cur.execute("""SELECT s.criado_em FROM saneamento.solicitacao s JOIN saneamento.interacao i
+                             ON i.solicitacao_id = s.id AND i.tipo = 'CORRECAO_RECEBIDA'
+                            WHERE i.conteudo->>'sha256' = %s ORDER BY s.id LIMIT 1""", (sha,))
+            row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn_s.close()
+
+
+def _registrar_solicitacao(quem: str, arquivo: str, sha: str, res: dict) -> int:
+    from psycopg2.extras import Json
+    conn_s = conectar_saneamento()
+    try:
+        with conn_s, conn_s.cursor() as cur:
+            contratos = ",".join(sorted({c for c, _ in res["respostas"]}))[:20]
+            cur.execute("""INSERT INTO saneamento.solicitacao (solicitante, canal, canal_ref, codigo_contrato, arquivo_nome,
+                             status) VALUES (%s, 'TEAMS', %s, %s, %s, 'AGUARDANDO_POS_VENDAS') RETURNING id""",
+                        (quem, Json({}), contratos, arquivo))
+            sid = cur.fetchone()[0]
+            cur.execute("""INSERT INTO saneamento.interacao (solicitacao_id, direcao, canal, tipo, ator, conteudo)
+                           VALUES (%s, 'ENTRADA', 'TEAMS', 'CORRECAO_RECEBIDA', %s, %s)""",
+                        (sid, quem, Json({"arquivo": arquivo, "sha256": sha, "linhas": res["linhas"],
+                                          "respostas": {f"{c}|{m}": v for (c, m), v in res["respostas"].items()}})))
+        return sid
+    finally:
+        conn_s.close()
+
+
+def receber_correcao(conteudo: bytes, arquivo: str, quem: str) -> dict:
+    """Parte rápida (a Cora responde na hora): lê, confere, guarda. -> {"ok", "mensagem", "trabalho"?}"""
+    import hashlib
+    sha = hashlib.sha256(conteudo).hexdigest()
+    quando = _ja_recebida(sha)
+    if quando:
+        return {"ok": False, "mensagem": f"Este arquivo é igual ao que chegou às {quando:%H:%M} de {quando:%d/%m} — nada novo. "
+                                         "Se corrigiu algo, saia da célula (para o Excel salvar) e mande de novo."}
+    res = correcao.respostas_da_planilha(conteudo, DADOS)
+    if not res["ok"]:
+        return {"ok": False, "mensagem": "⚠️ " + res["erro"]}
+    if not res["linhas"]:
+        return {"ok": False, "mensagem": "⚠️ Não achei nenhuma linha do motor nesse arquivo (coluna ID_MOTOR vazia)."}
+    guardar_respostas(res, quem, arquivo)
+    sid = _registrar_solicitacao(quem, arquivo, sha, res)
+    return {"ok": True, "solicitacao_id": sid, "linhas": res["linhas"], "erros": res["erros"],
+            "trabalho": {c: {m: seqs for (cc, m), seqs in res["escopo"].items() if cc == c}
+                         for c in sorted({c for c, _ in res["escopo"]})},
+            "mensagem": f"Recebi a correção: {res['linhas']} pessoa(s). Rodo o motor com os dados de hoje da Hapvida e te "
+                        "aviso o resultado aqui."}
+
+
+def processar_correcao(recebida: dict, arquivo: str, quem: str, nome: str | None = None) -> dict:
+    """Parte demorada (segundo plano): motor em cada movimentação, reenvio automático, uma mensagem com o resultado."""
+    sid = recebida["solicitacao_id"]
+    enviados, falhas, corrigir, portal, resolvidas = [], [], [], [], 0
+    for contrato, por_mov in recebida["trabalho"].items():
+        ctx = {"origem": "CORRECAO_POS_VENDAS", "solicitante": quem, "rodada": 2, "escopo_por_mov": por_mov,
+               "solicitacao_id": sid}
+        try:
+            resumos = rodar(contrato, sorted(por_mov), ctx, notificar=False)
+        except Recusa:
+            # uma movimentação que não dá pra analisar (ex.: recusada inteira, "não iniciou") não pode travar as outras
+            resumos = []
+            for mov in sorted(por_mov):
+                try:
+                    resumos += rodar(contrato, [mov], ctx, notificar=False)
+                except Exception as e:
+                    falhas.append(f"{contrato} movimentação {mov}: {e}")
+        except Exception as e:
+            falhas.append(f"{contrato}: {e}")
+            continue
+        for r in resumos:
+            corrigir += r.get("itens_corrigir") or []
+            portal += r.get("itens_portal") or []
+            resolvidas += len(r.get("resolvidas") or [])
+            env = r.get("reenvio") or {}
+            if env.get("enviado"):
+                enviados.append(env)
+            elif r.get("reenvio_automatico"):
+                falhas.append(f"{contrato}: {env.get('erro') or env.get('motivo') or 'o portal não confirmou o upload'}")
+    vidas = sum(int(e.get("linhas") or 0) for e in enviados)
+    partes = [f"📥 **Correção {arquivo}**"]
+    if enviados:
+        prot = ", ".join(f"{e['contrato']} movimentação {e['protocolo']}" if e.get("protocolo") else
+                         f"{e['contrato']} (protocolo ainda não aparece no portal — confiro em 45 min)" for e in enviados)
+        partes.append(f"✅ {vidas} vida(s) reenviada(s) à Hapvida: {prot}.")
+    if resolvidas - vidas > 0:
+        partes.append(f"✔️ {resolvidas - vidas} já resolvida(s) sem reenvio (já ativas ou em outro pedido).")
+    for f in falhas:
+        partes.append(f"⚠️ {f}")
+    anexo = None
+    if corrigir or portal:
+        titulo = f"{(nome or quem).split()[0].title()} — correção {sid}"
+        conteudo = ciclo.planilha_responsavel(corrigir, portal, titulo)
+        contratos = "_".join(sorted({i["contrato"] for i in corrigir + portal}))
+        anexo = DADOS / "_saidas" / "correcoes" / str(sid) / f"CORRECAO_MOTOR_{contratos}_{date.today():%Y%m%d}_{sid}.xlsx"
+        anexo.parent.mkdir(parents=True, exist_ok=True)
+        anexo.write_bytes(conteudo)
+        os.chmod(anexo, 0o600)
+        partes.append(f"⏳ {len(corrigir) + len(portal)} ainda trava(m): corrija só o vermelho (ou faça a ação no portal "
+                      "e escreva SIM em Feito?) e devolva.")
+    elif not falhas:
+        partes.append("Nada mais pendente nesta planilha.")
+    texto = "\n".join(partes)
+    if anexo:
+        _cora("/notificar-arquivo", {"upn": quem, "texto": texto, "arquivo_base64": _arquivo_b64(str(anexo)),
+                                     "nome_arquivo": anexo.name})
+    else:
+        _cora("/notificar", {"upn": quem, "texto": texto})
+    if quem.lower() != ciclo.ADMIN.lower():
+        _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"(cópia) {nome or quem}: " + texto})
+    return {"enviados": enviados, "pendentes": len(corrigir) + len(portal), "falhas": falhas}

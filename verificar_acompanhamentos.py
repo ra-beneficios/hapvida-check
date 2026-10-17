@@ -388,7 +388,11 @@ def processar_linha(cur, linha: dict) -> None:
     # sem tzinfo mas bate com o horario local (BRT) mostrado na tela do portal - compara os
     # dois como horario local "naive", sem timezone.
     enviado_em_naive = linha["enviado_em"].replace(tzinfo=None)
-    movimento = achar_movimento(dados, enviado_em_naive)
+    # 17/10/2026 (mesa de confiabilidade, R2): com o número da movimentação conferido no envio, casa por ele — pelo
+    # horário mais próximo só quando ele não veio (com 4x mais volume, o horário liga ao arquivo errado)
+    movimento = next((m for m in (dados.get("content") or {}).get("movements") or []
+                      if linha.get("controle_portal") and str(m.get("controlCode")) == str(linha["controle_portal"])), None) \
+        or achar_movimento(dados, enviado_em_naive)
 
     # #154 - achado real (feedback do Andre, 04/09): o nome_arquivo que a Cora salva
     # ("saida_hapvida_FHMWR.txt") NUNCA e' o nome que aparece no portal - o app.py sobe um
