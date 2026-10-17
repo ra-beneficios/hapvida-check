@@ -1,6 +1,11 @@
 services:
   hapvida-check:
-    build: .
+    build:
+      context: .
+      # 17/10/2026 (obra 1): motor de críticas e de exclusão vêm do repo lifetools para dentro da imagem
+      additional_contexts:
+        lifetools: /opt/lifetools
+    image: hapvida-check-hapvida-check:latest
     container_name: hapvida-check
     restart: unless-stopped
     # UID/GID do superadmin no host - sem isso, arquivos gravados no volume
@@ -46,13 +51,11 @@ services:
       - /opt/projeto_ra/_handoff/entrada:/projeto_ra/_handoff/entrada
       - /opt/projeto_ra/operadoras/Access/Hapvida:/projeto_ra/operadoras/Access/Hapvida:ro
       - ./secrets:/run/portais:ro
-      # Motor de Exclusao (03/10/2026): codigo do motor (repo lifetools, so' leitura), lotes na pasta padrao
+      # Motor de Exclusao (03/10/2026): lotes na pasta padrao (o codigo do motor vai na imagem desde 17/10/2026)
       # de movimentacoes (sincroniza com o SharePoint) e as fotos de censo/pedidos (dado de TODO o contrato)
       # numa pasta privada 700 fora do SharePoint.
-      - /opt/lifetools/motor_exclusao:/motor/motor_exclusao:ro
       - /opt/projeto_ra/operadoras/hapvida/movimentacoes:/projeto_ra/movimentacoes
       - /home/superadmin/motor_exclusao_dados/lotes:/dados_exclusao
-      - /opt/lifetools/service:/lifetools_service:ro
       - /home/superadmin/motor_criticas_dados:/dados_motor
     networks:
       - n8n_default

@@ -20,6 +20,45 @@ import scraper
 
 app = FastAPI()
 
+# 17/10/2026 (obra 1, publicação segura): quantos pedidos e tarefas em segundo plano estão rodando agora. O
+# publicar_hapvida_check.sh só troca o container quando chega a zero (reiniciar no meio derrubava upload em andamento).
+import threading  # noqa: E402
+
+_OCUPADO = {"n": 0}
+_TRAVA_OCUPADO = threading.Lock()
+
+
+def _ocupar(delta: int) -> None:
+    with _TRAVA_OCUPADO:
+        _OCUPADO["n"] += delta
+
+
+@app.middleware("http")
+async def _conta_ocupado(request, call_next):
+    if request.url.path in ("/health", "/saude/ocupado"):
+        return await call_next(request)
+    _ocupar(1)
+    try:
+        return await call_next(request)
+    finally:
+        _ocupar(-1)
+
+
+def em_segundo_plano(fn):
+    """Tarefa de segundo plano que conta como ocupado enquanto roda."""
+    def rodar(*a, **k):
+        _ocupar(1)
+        try:
+            return fn(*a, **k)
+        finally:
+            _ocupar(-1)
+    return rodar
+
+
+@app.get("/saude/ocupado")
+def saude_ocupado():
+    return {"ocupado": _OCUPADO["n"]}
+
 
 @app.get("/health")
 def health():
@@ -337,7 +376,7 @@ def _ciclo_em_segundo_plano(p: CicloRodar) -> None:
 def ciclo_rodar(p: CicloRodar, tarefas: BackgroundTasks):
     if not p.controles:
         raise HTTPException(status_code=409, detail="escolha ao menos uma movimentação")
-    tarefas.add_task(_ciclo_em_segundo_plano, p)
+    tarefas.add_task(em_segundo_plano(_ciclo_em_segundo_plano), p)
     return {"aceito": True}
 
 
@@ -366,7 +405,7 @@ def ciclo_correcao(p: CicloCorrecao, tarefas: BackgroundTasks):
     Cora avisa o resultado (uma mensagem, com a planilha só do que ainda trava)."""
     rec = ciclo_criticas.receber_correcao(base64.b64decode(p.arquivo_base64), p.nome_arquivo, p.solicitante_upn)
     if rec.get("ok"):
-        tarefas.add_task(_correcao_em_segundo_plano, rec, p)
+        tarefas.add_task(em_segundo_plano(_correcao_em_segundo_plano), rec, p)
     return {"ok": rec["ok"], "mensagem": rec["mensagem"], "linhas": rec.get("linhas", 0)}
 
 

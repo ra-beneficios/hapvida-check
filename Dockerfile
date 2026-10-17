@@ -13,7 +13,16 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py scraper.py censo_legado.py censo_legado_parser.py censo_saude.py copart_saude.py boletos_saude.py documentos_saude.py documentos_legado.py enviar_documentos.py auto_commit.py bulk_import_beneficiarios_oficial.py movimentacao_saude.py secrets_store.py verificar_acompanhamentos.py faturamento_mensal.py padrao_faturamento.py envio_faturamento.py exclusao_api.py legado_auto.py ciclo_criticas.py ciclo_inclusao.py ./
+# 17/10/2026: todos os .py (antes era uma lista: arquivo novo esquecido só aparecia em produção)
+COPY *.py ./
+
+# 17/10/2026 (obra 1): o motor de críticas (service/saneamento + pipeline) e o motor de exclusão vão DENTRO da imagem,
+# vindos do repo lifetools pelo contexto "lifetools" (publicar_hapvida_check.sh). Antes eram volumes ao vivo: salvar um
+# arquivo mudava o vigia na rodada seguinte, sem teste nem publicação.
+COPY --from=lifetools service/saneamento /lifetools_service/saneamento
+COPY --from=lifetools service/pipeline /lifetools_service/pipeline
+COPY --from=lifetools motor_exclusao /motor/motor_exclusao
+COPY tests ./tests
 
 EXPOSE 8000
 
