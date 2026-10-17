@@ -146,6 +146,11 @@ def _enviar(lote: str, onda: str, hash_txt: str, solicitante_upn: str, pastas: s
                     f"Hapvida (status {st or 'desconhecido'}) - os dependentes so' podem ir depois")
     resultado = movimentacao_saude.run_inclusao(os.environ.get("GCP_PROJECT"), alvo["contrato"], alvo["caminho"])
     protocolo = _achar_protocolo(alvo["contrato"], alvo["arquivo"]) if resultado.get("status") in (200, None) else None
+    try:
+        import portal_envio
+        portal_envio.conferido(os.path.basename(alvo["caminho"]), protocolo)
+    except Exception as e:
+        print(f"[exclusao] registro do envio: {e}")
     envio = {"onda": onda, "contrato": alvo["contrato"], "hash": hash_txt, "arquivo": alvo["arquivo"],
              "linhas": alvo["linhas"], "status": resultado.get("status"), "protocolo": protocolo,
              "por": solicitante_upn, "em": datetime.now().astimezone().isoformat()}

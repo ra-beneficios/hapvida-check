@@ -606,6 +606,14 @@ def run() -> None:
 
     lembrar_ondas_pendentes(cur, simular=os.environ.get("LEMBRETE_SIMULAR") == "1")
 
+    # 17/10/2026 (obra 2): confere no portal os envios sem movimentação (reinício no meio não perde nem duplica)
+    try:
+        import portal_envio
+        for m in portal_envio.reconciliar():
+            print(f"[envio] {m}")
+    except Exception as e:
+        print(f"[envio] reconciliação falhou: {type(e).__name__}: {e}")
+
     cur.close()
     conn.close()
 
