@@ -217,9 +217,15 @@ CONTRATOS_CONTA_MARCO: set[str] = set()
 
 
 def run_inclusao(project: str, codigo_contrato: str, arquivo_txt_path: str) -> dict:
+    """Ponto único de upload ao portal (inclusão da Cora, reenvio do motor, exclusão). 17/10/2026 (obra 2): registra em
+    portal.envio ANTES de subir e o resultado depois — reiniciar no meio não perde nem duplica (portal_envio.py)."""
+    import portal_envio
+    eid = portal_envio.antes(codigo_contrato, arquivo_txt_path)   # levanta portal_envio.Duplicado nos tipos que bloqueiam
     secret_id = "hapvida-portal-saude-marco" if codigo_contrato.upper() in CONTRATOS_CONTA_MARCO else "hapvida-portal-saude"
     creds = get_credentials(project, secret_id)
-    return enviar_movimentacao(creds["usuario"], creds["senha"], codigo_contrato, arquivo_txt_path)
+    resultado = enviar_movimentacao(creds["usuario"], creds["senha"], codigo_contrato, arquivo_txt_path)
+    portal_envio.depois(eid, resultado)
+    return resultado
 
 
 def _credenciais_por_contrato(project: str, codigo_contrato: str) -> dict:

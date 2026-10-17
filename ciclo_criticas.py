@@ -323,7 +323,11 @@ def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> 
         caminho = Path(tempfile.mkdtemp()) / nome
         caminho.write_bytes("".join(l + "\n" for l in linhas).encode("ascii") if sistema else row[0].encode("ascii"))
         try:
+            import portal_envio
             up = ms.run_inclusao(os.environ.get("GCP_PROJECT", ""), contrato, str(caminho))
+        except portal_envio.Duplicado as e:   # 17/10/2026 (obra 2): o mesmo arquivo já foi entregue — não sobe de novo
+            persistencia.marcar_desfecho(conn_s, eid, "DESCARTADA", aprovado_por, {"motivo": f"duplicado: {e}"})
+            return {"enviado": False, "status": None, "contrato": contrato, "linhas": len(linhas), "motivo": str(e)}
         finally:
             caminho.unlink(missing_ok=True)
         status = up.get("status")
@@ -332,6 +336,10 @@ def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> 
             return {"enviado": False, "status": status, "contrato": contrato, "linhas": len(linhas)}
         confirmacao = ((up.get("body") or {}).get("content")) if isinstance(up.get("body"), dict) else None
         protocolo = _achar_protocolo(contrato, nome)
+        try:
+            portal_envio.conferido(nome, protocolo)
+        except Exception as e:
+            print(f"[reenvio] registro do envio: {e}")
         persistencia.marcar_desfecho(conn_s, eid, "ENVIADA", aprovado_por,
                                      {"status_upload": status, "confirmacao": confirmacao, "protocolo": protocolo,
                                       "escopo": escopo, "linhas": len(linhas)})

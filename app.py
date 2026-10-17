@@ -213,6 +213,8 @@ def run_inclusao(payload: Inclusao):
         try:
             resultado["protocolo_portal"] = ciclo_criticas._achar_protocolo(
                 payload.codigo_contrato.upper(), os.path.basename(caminho_tmp), tentativas=2)
+            import portal_envio
+            portal_envio.conferido(os.path.basename(caminho_tmp), resultado["protocolo_portal"])
         except Exception as e:
             print(f"[run-inclusao] não consegui conferir na lista do portal: {type(e).__name__}: {e}")
             resultado["protocolo_portal"] = None
