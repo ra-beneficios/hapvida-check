@@ -46,6 +46,15 @@ STATUS_PT = {"FileProcessed": "Processado sem críticas", "FileProcessedWithRevi
              "UnableToStart": "Ainda não iniciou"}
 
 
+def linhas_que_derrubam(conteudo: bytes) -> list[str]:
+    """Portão do layout de inclusão (829 posições) — ver saneamento.layout.portao_upload."""
+    out = []
+    for i, l in enumerate(conteudo.decode("latin-1").splitlines(), 1):
+        if l.strip():
+            out += [f"linha {i}: {e}" for e in layout.portao_upload(l)]
+    return out
+
+
 class Recusa(Exception):
     """Regra de negócio (não é o aprovador, situação mudou...): vira 409 com o texto pra Cora mostrar."""
 
@@ -271,6 +280,9 @@ def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> 
             raise Recusa(f"não há carga {escopo} nessa análise")
         linhas = [l for l in row[0].splitlines() if l]
         contrato = e["contrato"]
+        ruins = linhas_que_derrubam("".join(l + "\n" for l in linhas).encode("latin-1"))
+        if ruins:   # 17/10/2026: nunca sobe o que derruba o arquivo inteiro
+            raise Recusa("o reenvio tem linha que a Hapvida recusaria inteira: " + "; ".join(ruins[:3]))
         # reconfere no portal: alguém da carga já está no contrato, num arquivo mais novo (mesmo processando) ou
         # num pedido via tela? Qualquer um -> não sobe. Consulta que falha -> não sobe.
         cpfs = {l[119:130].strip() for l in linhas}

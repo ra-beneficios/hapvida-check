@@ -154,6 +154,11 @@ def run_inclusao(payload: Inclusao):
     scripts_cowork/patch2_modalidade/150_checar_status_inclusoes_24h.py no repo lifetools."""
     project = os.environ["GCP_PROJECT"]
     conteudo = base64.b64decode(payload.arquivo_txt_base64)
+    # 17/10/2026: portão do layout — o que derruba o arquivo inteiro na Hapvida não sobe (vira erro técnico pro André)
+    ruins = ciclo_criticas.linhas_que_derrubam(conteudo)
+    if ruins:
+        return {"status": 422, "erro": "arquivo barrado no portão do layout (derrubaria o arquivo inteiro na Hapvida): "
+                                       + "; ".join(ruins[:5])}
 
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
         tmp.write(conteudo)
