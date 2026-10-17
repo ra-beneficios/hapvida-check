@@ -502,6 +502,7 @@ def _guardar_respostas(res: dict, quem: str, arquivo: str) -> None:
             a["campos"].update(r["campos"])
             a["confirmados"] = sorted(set(a["confirmados"]) | set(r["confirmados"]))
             a["feito"] = a["feito"] or r["feito"]
+            a["remover"] = a.get("remover", False) or r.get("remover", False)
             linha = originais.get(seq, "")
             for campo, v in a["campos"].items():
                 linha = layout.gravar(linha, campo, v)
