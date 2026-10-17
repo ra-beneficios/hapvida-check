@@ -261,7 +261,47 @@ def _login_e_capturar_headers(page, usuario: str, senha: str, codigo_contrato: s
     except Exception:
         pass
     _localizar_e_entrar_no_contrato(page, codigo_contrato)
-    return _capturar_headers_api(page)
+    headers = _capturar_headers_api(page)
+    _proteger_contrato(page, codigo_contrato)
+    return headers
+
+
+CONTRATO_TROCADO = "selecione novamente seu contrato"
+
+
+def _proteger_contrato(page, codigo_contrato: str, tentativas: int = 2) -> None:
+    """17/10/2026 (achado real): o portal guarda UM contrato selecionado por usuário. Todas as automações entram com a
+    mesma conta (Cora); quando duas rodam juntas em contratos diferentes (vigia de 15 em 15 min + motor + upload), a
+    outra sessão troca o contrato e a nossa passa a receber 400 "O contrato da sua página foi atualizado. Selecione
+    novamente seu contrato" — era a causa dos 400 "transitórios" (lista de movimentações, pedidos via tela, life-data).
+    Daqui em diante, toda chamada da página que receber esse 400 seleciona o contrato de novo e repete."""
+    req = page.request
+    if getattr(req, "_contrato_protegido", None) == codigo_contrato:
+        return
+
+    def embrulhar(metodo):
+        original = getattr(req, metodo)
+
+        def chamada(*a, **k):
+            r = original(*a, **k)
+            for _ in range(tentativas):
+                if r.status != 400:
+                    return r
+                try:
+                    trocado = CONTRATO_TROCADO in (r.text() or "").lower()
+                except Exception:
+                    trocado = False
+                if not trocado:
+                    return r
+                print(f"[sessao] contrato {codigo_contrato} trocado por outra sessão da mesma conta - selecionando de novo")
+                _localizar_e_entrar_no_contrato(page, codigo_contrato)
+                r = original(*a, **k)
+            return r
+        return chamada
+
+    for metodo in ("get", "post", "put", "delete", "fetch"):
+        setattr(req, metodo, embrulhar(metodo))
+    req._contrato_protegido = codigo_contrato
 
 
 def checar_status_movimentacoes(project: str, codigo_contrato: str, limit: int = 10) -> dict:

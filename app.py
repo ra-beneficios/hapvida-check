@@ -163,7 +163,15 @@ def run_inclusao(payload: Inclusao):
         resultado = movimentacao_saude.run_inclusao(project, payload.codigo_contrato.upper(), caminho_tmp)
     finally:
         os.unlink(caminho_tmp)
-
+    # 17/10/2026 (André: "ter certeza que 'vidas enviadas à Hapvida' é verdade"): o 200 do upload não prova que a
+    # movimentação existe. Procura o arquivo na lista de movimentações do contrato e devolve o número dela.
+    if resultado.get("status") == 200:
+        try:
+            resultado["protocolo_portal"] = ciclo_criticas._achar_protocolo(
+                payload.codigo_contrato.upper(), os.path.basename(caminho_tmp), tentativas=2)
+        except Exception as e:
+            print(f"[run-inclusao] não consegui conferir na lista do portal: {type(e).__name__}: {e}")
+            resultado["protocolo_portal"] = None
     return resultado
 
 
@@ -326,6 +334,35 @@ def ciclo_rodar(p: CicloRodar, tarefas: BackgroundTasks):
         raise HTTPException(status_code=409, detail="escolha ao menos uma movimentação")
     tarefas.add_task(_ciclo_em_segundo_plano, p)
     return {"aceito": True}
+
+
+class CicloCorrecao(BaseModel):
+    arquivo_base64: str
+    nome_arquivo: str
+    solicitante_upn: str
+    solicitante_nome: str | None = None
+
+
+def _correcao_em_segundo_plano(rec: dict, p: CicloCorrecao) -> None:
+    try:
+        ciclo_criticas.processar_correcao(rec, p.nome_arquivo, p.solicitante_upn, p.solicitante_nome)
+    except Exception as e:
+        print(f"[correcao] erro na solicitação {rec.get('solicitacao_id')}: {type(e).__name__}: {e}")
+        ciclo_criticas._cora("/notificar", {"upn": p.solicitante_upn,
+                                            "texto": "⚠️ A correção deu erro técnico no motor — avisei o André. Não precisa reenviar."})
+        ciclo_criticas._cora("/notificar", {"upn": ciclo_criticas.ciclo.ADMIN,
+                                            "texto": f"🛠️ Correção {rec.get('solicitacao_id')} ({p.nome_arquivo}) falhou: "
+                                                     f"{type(e).__name__}: {str(e)[:200]}"})
+
+
+@app.post("/ciclo/correcao")
+def ciclo_correcao(p: CicloCorrecao, tarefas: BackgroundTasks):
+    """17/10/2026: volta da planilha de correção do pós-vendas. Responde na hora; o motor roda em segundo plano e a
+    Cora avisa o resultado (uma mensagem, com a planilha só do que ainda trava)."""
+    rec = ciclo_criticas.receber_correcao(base64.b64decode(p.arquivo_base64), p.nome_arquivo, p.solicitante_upn)
+    if rec.get("ok"):
+        tarefas.add_task(_correcao_em_segundo_plano, rec, p)
+    return {"ok": rec["ok"], "mensagem": rec["mensagem"], "linhas": rec.get("linhas", 0)}
 
 
 @app.post("/ciclo/aprovar")
