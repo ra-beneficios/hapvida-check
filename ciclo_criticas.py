@@ -41,6 +41,20 @@ from saneamento.ferramentas import coletar_ceps  # noqa: E402
 DADOS = Path(os.environ.get("CICLO_DADOS", "/dados_motor"))
 CORA = os.environ.get("CORA_BASE_URL", "http://cora:3978")
 STATUS_FINAIS = {"FileProcessed", "FileProcessedWithReview", "ProcessFileWithPendency"}
+PARADA_APOS_HORAS = 24
+
+
+def parada(m: dict, agora: datetime | None = None) -> bool:
+    """18/10/2026 (8DAC9 1332747): "Em processamento" sem mudar há mais de 24h = parada (vida esperando documento no
+    portal). O motor analisa assim mesmo: as linhas que já terminaram são tratadas e as que esperam documento vão como
+    ação no portal — senão as criticadas ficam presas junto com elas e a vigia desiste com o relatório cru."""
+    if m.get("status") != "ProcessFile" or not m.get("updatedAt"):
+        return False
+    try:
+        mudou = datetime.fromisoformat(str(m["updatedAt"])[:19])
+    except ValueError:
+        return False
+    return ((agora or datetime.now()) - mudou).total_seconds() >= PARADA_APOS_HORAS * 3600
 STATUS_PT = {"FileProcessed": "Processado sem críticas", "FileProcessedWithReview": "Finalizado com críticas",
              "ProcessFileWithPendency": "Processamento com pendência", "ProcessFile": "Em processamento",
              "UnableToStart": "Ainda não iniciou"}
@@ -88,7 +102,7 @@ def movimentacoes_do_dia(contrato: str, dia: str) -> list[dict]:
         nome = m.get("uploadName") or ""
         out.append({"controle": str(m["controlCode"]), "criada_em": m.get("createdAt"), "status": m.get("status"),
                     "status_legivel": STATUS_PT.get(m.get("status"), m.get("status")),
-                    "final": m.get("status") in STATUS_FINAIS,
+                    "final": m.get("status") in STATUS_FINAIS or parada(m),
                     "tipo": "EXCLUSAO" if nome.upper().startswith("EXCLUSAO_") else "INCLUSAO",
                     "arquivo": nome, "rejeitadas_arquivo": int(m.get("totalShippingReviews") or 0)})
     return sorted(out, key=lambda x: x["criada_em"] or "", reverse=True)
@@ -107,7 +121,7 @@ def rodar(contrato: str, controles: list[str], contexto: dict, notificar: bool =
             m = movs.get(str(cc))
             if not m:
                 raise Recusa(f"a movimentação {cc} não aparece na lista do contrato {contrato} no portal")
-            if m.get("status") not in STATUS_FINAIS:
+            if m.get("status") not in STATUS_FINAIS and not parada(m):
                 raise Recusa(f"a movimentação {cc} ainda está \"{STATUS_PT.get(m.get('status'), m.get('status'))}\" "
                              "na Hapvida — o resultado só vale depois que ela termina de processar")
             coleta_portal.coletar_movimentacao(page, headers, contrato, m, DADOS)
