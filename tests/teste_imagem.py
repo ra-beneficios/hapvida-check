@@ -16,7 +16,7 @@ def ok(cond, msg):
 
 for m in ["app", "ciclo_criticas", "ciclo_inclusao", "verificar_acompanhamentos", "exclusao_api", "movimentacao_saude",
           "censo_saude", "censo_legado", "copart_saude", "boletos_saude", "documentos_saude", "documentos_legado",
-          "enviar_documentos", "faturamento_mensal", "envio_faturamento", "legado_auto"]:
+          "enviar_documentos", "faturamento_mensal", "envio_faturamento", "legado_auto", "pedidos_digitacao"]:
     try:
         importlib.import_module(m)
         ok(True, f"importa {m}")
@@ -41,6 +41,14 @@ ok(ciclo_criticas.parada({"status": "ProcessFile", "updatedAt": "2026-10-16T15:3
 ok(not ciclo_criticas.parada({"status": "ProcessFile", "updatedAt": "2026-10-18T07:00:00"}, agora), "parada: ProcessFile há 1h, não")
 ok(not ciclo_criticas.parada({"status": "UnableToStart", "updatedAt": "2026-10-10T07:00:00"}, agora), "parada: só ProcessFile")
 ok(not ciclo_criticas.parada({"status": "ProcessFile"}, agora), "parada: sem updatedAt, não")
+# 18/10/2026: resumo dos pedidos via tela em digitação (o que saiu, o que trava, ativo no mesmo contrato)
+import pedidos_digitacao  # noqa: E402
+
+t = pedidos_digitacao.resumo([{"contrato": "X", "pedido": "1", "acao": "CONCLUIDO", "ok": True, "status": "Processado", "vidas": ["A"]},
+                              {"contrato": "X", "pedido": "2", "acao": "CONCLUIDO", "ok": False, "falta": ["A: anexar RG"], "vidas": ["A"]},
+                              {"contrato": "Y", "pedido": "3", "acao": "NAO_CONCLUIR", "motivo": "já ativo", "vidas": ["B"]}])
+ok("1 concluído" in t and "anexar RG" in t and "não concluí" in t, "pedidos em digitação: resumo")
+ok(pedidos_digitacao.resumo([{"contrato": "X", "acao": "AGUARDAR"}]) == "", "pedidos em digitação: nada a avisar")
 from saneamento.motor import VERSAO_MOTOR  # noqa: E402
 
 print("motor", VERSAO_MOTOR)
