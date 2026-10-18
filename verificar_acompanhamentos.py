@@ -527,7 +527,9 @@ def processar_linha(cur, linha: dict) -> None:
                                proxima_checagem_em = now() + interval '2 hours'
                            WHERE id = %s""", (status_raw, linha["id"]))
             return
-        if status_raw in STATUS_COM_CRITICA:
+        # 18/10/2026 (8DAC9 1332747): "Em processamento" passado o prazo = parada (vida esperando documento) — o motor
+        # analisa assim mesmo (ciclo_criticas.parada) em vez de cair no relatório cru
+        if status_raw in STATUS_COM_CRITICA or (CICLO_NO_VIGIA and status_raw == "ProcessFile"):
             if _rodar_ciclo(cur, linha, control_code):
                 _registrar_recusas_exclusao(linha, codigo_contrato, control_code, None)
                 cur.execute("""UPDATE movimentacoes_hapvida_acompanhamento

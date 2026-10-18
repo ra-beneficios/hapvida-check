@@ -32,6 +32,15 @@ rotas = {r.path for r in app.app.routes}
 for r in ["/run-inclusao", "/ciclo/correcao", "/ciclo/rodar", "/ciclo/aprovar", "/exclusao/enviar", "/saude/ocupado",
           "/inclusao/preparar" if "/inclusao/preparar" in rotas else "/ciclo/movimentacoes"]:
     ok(r in rotas, f"rota {r}")
+# 18/10/2026 (8DAC9 1332747): "Em processamento" parado há 24h+ é analisado pelo motor; recente e outros status, não
+from datetime import datetime  # noqa: E402
+import ciclo_criticas  # noqa: E402
+
+agora = datetime(2026, 10, 18, 8, 0)
+ok(ciclo_criticas.parada({"status": "ProcessFile", "updatedAt": "2026-10-16T15:38:52"}, agora), "parada: ProcessFile há 40h")
+ok(not ciclo_criticas.parada({"status": "ProcessFile", "updatedAt": "2026-10-18T07:00:00"}, agora), "parada: ProcessFile há 1h, não")
+ok(not ciclo_criticas.parada({"status": "UnableToStart", "updatedAt": "2026-10-10T07:00:00"}, agora), "parada: só ProcessFile")
+ok(not ciclo_criticas.parada({"status": "ProcessFile"}, agora), "parada: sem updatedAt, não")
 from saneamento.motor import VERSAO_MOTOR  # noqa: E402
 
 print("motor", VERSAO_MOTOR)
