@@ -101,7 +101,7 @@ def rodar(contrato: str, controles: list[str], contexto: dict, notificar: bool =
     pasta_contrato = DADOS / contrato
     coletadas, exclusoes = [], []
     with coleta_portal.sessao(contrato) as (page, headers):
-        movs = {str(m["controlCode"]): m for m in coleta_portal.listar_movimentacoes(page, headers, contrato)}
+        movs = coleta_portal.achar_movimentacoes(page, headers, contrato, controles)   # paginada (18/10/2026)
         cpfs = set()
         for cc in controles:
             m = movs.get(str(cc))
@@ -585,7 +585,7 @@ def receber_correcao(conteudo: bytes, arquivo: str, quem: str) -> dict:
 def processar_correcao(recebida: dict, arquivo: str, quem: str, nome: str | None = None) -> dict:
     """Parte demorada (segundo plano): motor em cada movimentação, reenvio automático, uma mensagem com o resultado."""
     sid = recebida["solicitacao_id"]
-    enviados, falhas, corrigir, portal, resolvidas = [], [], [], [], 0
+    enviados, falhas, corrigir, portal, resolvidas, reenvia = [], [], [], [], set(), []
     for contrato, por_mov in recebida["trabalho"].items():
         ctx = {"origem": "CORRECAO_POS_VENDAS", "solicitante": quem, "rodada": 2, "escopo_por_mov": por_mov,
                "solicitacao_id": sid}
@@ -605,7 +605,8 @@ def processar_correcao(recebida: dict, arquivo: str, quem: str, nome: str | None
         for r in resumos:
             corrigir += r.get("itens_corrigir") or []
             portal += r.get("itens_portal") or []
-            resolvidas += len(r.get("resolvidas") or [])
+            resolvidas |= {(r["contrato"], r["controle"], x) for x in r.get("resolvidas") or []}   # 18/10: cada pessoa uma vez
+            reenvia += [f"{r['contrato']}|{r['controle']}|{x}" for x in r.get("motor_reenvia") or []]
             env = r.get("reenvio") or {}
             if env.get("enviado"):
                 enviados.append(env)
@@ -617,14 +618,14 @@ def processar_correcao(recebida: dict, arquivo: str, quem: str, nome: str | None
         prot = ", ".join(f"{e['contrato']} movimentação {e['protocolo']}" if e.get("protocolo") else
                          f"{e['contrato']} (protocolo ainda não aparece no portal — confiro em 45 min)" for e in enviados)
         partes.append(f"✅ {vidas} vida(s) reenviada(s) à Hapvida: {prot}.")
-    if resolvidas - vidas > 0:
-        partes.append(f"✔️ {resolvidas - vidas} já resolvida(s) sem reenvio (já ativas ou em outro pedido).")
+    if resolvidas:
+        partes.append(f"✔️ {len(resolvidas)} já resolvida(s) sem reenvio (já ativas ou em outro pedido).")
     for f in falhas:
         partes.append(f"⚠️ {f}")
     anexo = None
     if corrigir or portal:
         titulo = f"{(nome or quem).split()[0].title()} — correção {sid}"
-        conteudo = ciclo.planilha_responsavel(corrigir, portal, titulo)
+        conteudo = ciclo.planilha_responsavel(corrigir, portal, titulo, reenvia)
         contratos = "_".join(sorted({i["contrato"] for i in corrigir + portal}))
         anexo = DADOS / "_saidas" / "correcoes" / str(sid) / f"CORRECAO_MOTOR_{contratos}_{date.today():%Y%m%d}_{sid}.xlsx"
         anexo.parent.mkdir(parents=True, exist_ok=True)
