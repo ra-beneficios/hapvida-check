@@ -51,5 +51,14 @@ ok("1 concluído" in t and "anexar RG" in t and "não concluí" in t, "pedidos e
 ok(pedidos_digitacao.resumo([{"contrato": "X", "acao": "AGUARDAR"}]) == "", "pedidos em digitação: nada a avisar")
 from saneamento.motor import VERSAO_MOTOR  # noqa: E402
 
+# 19/10/2026: reenvio nunca para calado; vigia da inclusão reanalisa pedido cancelado e entrega o relatório de 49 colunas
+import ciclo_inclusao  # noqa: E402
+from saneamento.ferramentas import fechar_contrato  # noqa: E402
+
+ok(callable(getattr(ciclo_criticas, "cargas_paradas", None)), "reenvio: vigia de carga parada")
+ok(callable(getattr(ciclo_inclusao, "reanalisar_cancelados", None)) and callable(getattr(ciclo_inclusao, "relatorio_final", None)),
+   "inclusão: pedido cancelado + relatório final")
+ok(callable(getattr(fechar_contrato, "relatorio", None)), "fechar_contrato.relatorio na imagem")
+ok(tuple(int(x) for x in VERSAO_MOTOR.split(".")) >= (0, 4, 6), f"motor >= 0.4.6 ({VERSAO_MOTOR})")
 print("motor", VERSAO_MOTOR)
 sys.exit(1 if falhas else 0)
