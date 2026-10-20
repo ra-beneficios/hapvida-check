@@ -3,7 +3,9 @@
 Cada inclusão feita pela Cora fica em saneamento.inclusao até cada vida estar ativa ou encerrada. Roda pelo cron
 (a cada 30 min, horário comercial) e faz, por inclusão aberta:
   - confere na Hapvida quem já ficou ativo (no máximo a cada 2h) e grava essas vidas no nosso banco (passo 13);
-  - todas ativas -> card final (passo 19);
+  - na mesma conferência, pedido que a Hapvida CANCELOU (205/206 sem documento) roda o motor de novo e sobe de novo
+    pra pendenciar, sem aprovação (19/10/2026, André: "inclui, deixa pendenciar, relatório");
+  - todas ativas -> card final (passo 19) + o relatório de 49 colunas do /fechar-contrato só com as vidas da inclusão;
   - quando nada mais está em andamento no contrato (o motor esgotou) e ainda falta vida, pergunta ao pós-vendas:
     Continuar incluindo / Finalizar (passo 17);
   - Continuar: lembrete a cada 8h úteis, com o lote/protocolo e "Quero o arquivo";
@@ -18,6 +20,7 @@ import io
 import json
 import os
 import sys
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -43,6 +46,8 @@ AVISO_GESTOR_ANTES_DO_PRAZO = 10    # 17/10/2026 (André): gestor avisado 10 dia
 EXPEDIENTE = (8, 18)            # horário comercial: seg–sex, 8h–18h
 PLANO_ODONTO = "9732"           # 117 do Odonto (regra do André, 24/09)
 FINAIS_ACOMPANHAMENTO = ("CONCLUIDO", "FALHOU")
+DADOS = Path(os.environ.get("CICLO_DADOS", "/dados_motor"))
+STATUS_FINAIS = {"FileProcessed", "FileProcessedWithReview", "ProcessFileWithPendency"}
 
 
 class Recusa(Exception):
@@ -162,20 +167,74 @@ def _so_cpfs(xlsx: bytes, cpfs: set[str]) -> tuple[list, list[list], dict]:
 
 
 # ── passo 13: quem ficou ativo + gravar no banco ────────────────────────────────────────────────────────
-def conferir_ativas(inc: dict, simular: bool) -> set[str]:
-    """CPFs que ficaram ativos agora (consulta ao vivo, só dos que faltam)."""
+def conferir_ativas(inc: dict, simular: bool) -> tuple[set[str], dict[str, set[str]]]:
+    """CPFs que ficaram ativos agora (consulta ao vivo, só dos que faltam) e, por movimentação da inclusão, os que a
+    Hapvida CANCELOU depois (19/10/2026, Juracy WP64K: pedido 205/206 cancelado sem documento ficava esquecido)."""
     vidas = {v["cpf"] for v in inc["vidas"] if v.get("cpf")}
     faltam = sorted(vidas - set(inc["ativas"]))
-    novas = set()
+    novas, cancelados = set(), {}
     if not faltam:
-        return novas
+        return novas, cancelados
     with coleta_portal.sessao(inc["contrato"]) as (page, headers):
         for cpf in faltam:
             det = coleta_portal.certificados_do_cpf(page, headers, inc["contrato"], cpf)
             if det and any(normalizar((c.get("statusDetail") or {}).get("description") or c.get("_status_lista") or "") == "ATIVO"
                            for c in det):
                 novas.add(cpf)
-    return novas
+        try:
+            cancelados = _cancelados_novos(page, headers, inc, set(faltam) - novas)
+        except Exception as e:   # não atrapalha a conferência das ativas
+            print(f"[inclusao {inc['id']}] busca de pedido cancelado falhou ({type(e).__name__}: {e})")
+    return novas, cancelados
+
+
+def _movs_da_inclusao(page, headers, inc: dict) -> list[dict]:
+    """Movimentações de inclusão do contrato desde a inclusão (o envio e os reenvios do motor)."""
+    desde = (_naive(inc["criada_em"]) - timedelta(minutes=10)).isoformat(timespec="seconds")
+    return [m for m in coleta_portal.listar_movimentacoes(page, headers, inc["contrato"], 100)
+            if (m.get("createdAt") or "") >= desde and not (m.get("uploadName") or "").upper().startswith("EXCLUSAO_")]
+
+
+def _marca_cancelados(contrato: str, controle: str) -> Path:
+    return DADOS / contrato / controle / "cancelados_reanalisados.json"
+
+
+def _cancelados_novos(page, headers, inc: dict, pendentes: set[str]) -> dict[str, set[str]]:
+    """{controle: cpfs} cancelados pela Hapvida que o motor ainda não reanalisou."""
+    out = {}
+    for m in _movs_da_inclusao(page, headers, inc):
+        if m.get("status") not in STATUS_FINAIS:
+            continue
+        cc = str(m["controlCode"])
+        coleta_portal.coletar_movimentacao(page, headers, inc["contrato"], m, DADOS)
+        vidas = json.loads((DADOS / inc["contrato"] / cc / "vidas.json").read_text())
+        canc = {str((v.get("life") or {}).get("document") or "").zfill(11) for v in vidas if v.get("status") == "Canceled"}
+        marca = _marca_cancelados(inc["contrato"], cc)
+        ja = set(json.loads(marca.read_text())) if marca.exists() else set()
+        novos = (canc & pendentes) - ja
+        if novos:
+            out[cc] = novos
+    return out
+
+
+def reanalisar_cancelados(inc: dict, cancelados: dict[str, set[str]], simular: bool) -> None:
+    """Motor de novo na movimentação: pedido cancelado sem documento sobe de novo pra pendenciar (motor 0.4.6), sem
+    aprovação (VIGIA_INCLUSAO); quem já está ativo ou em pedido mais novo sai na conferência do reenvio."""
+    import ciclo_criticas
+    for cc, cpfs in cancelados.items():
+        print(f"[inclusao {inc['id']}] {len(cpfs)} pedido(s) cancelado(s) pela Hapvida na {cc}: motor de novo")
+        if simular:
+            continue
+        try:
+            ciclo_criticas.rodar(inc["contrato"], [cc], {"origem": "VIGIA_INCLUSAO", "solicitante": inc["solicitante_upn"],
+                                                         "rodada": 1}, notificar=False)
+        except Exception as e:
+            print(f"[inclusao {inc['id']}] motor na {cc} falhou ({type(e).__name__}: {e}); tento na próxima conferência")
+            continue
+        marca = _marca_cancelados(inc["contrato"], cc)
+        ja = set(json.loads(marca.read_text())) if marca.exists() else set()
+        marca.write_text(json.dumps(sorted(ja | cpfs)))
+        os.chmod(marca, 0o600)
 
 
 def gravar_ativas(inc: dict, cpfs: set[str], simular: bool) -> None:
@@ -274,6 +333,27 @@ def txt_odonto(inc: dict, premium: str) -> tuple[bytes, str] | None:
     return base64.b64decode(j["arquivo_txt_base64"]), f"ODONTO_PREMIUM_{premium}_{inc['contrato']}_{inc['id']}.txt"
 
 
+def relatorio_final(inc: dict) -> Path | None:
+    """O mesmo relatório do /fechar-contrato (49 colunas + Status + Problema), só com as vidas desta inclusão
+    (André, 19/10/2026). Falha aqui não impede o card final."""
+    try:
+        from saneamento.ferramentas import fechar_contrato as fc
+        with coleta_portal.sessao(inc["contrato"]) as (page, headers):
+            movs = _movs_da_inclusao(page, headers, inc)
+            for m in movs:
+                coleta_portal.coletar_movimentacao(page, headers, inc["contrato"], m, DADOS)
+        meta = [{k: m.get(k) for k in ("controlCode", "uploadName", "status", "createdAt")} for m in movs]
+        cpfs = {v["cpf"] for v in inc["vidas"] if v.get("cpf")}
+        ativos = {v["cpf"]: v.get("nome") or "" for v in inc["vidas"] if v.get("cpf") in inc["ativas"]}
+        sufixo = f"{inc['contrato']}_INCLUSAO_{inc['id']}_{datetime.now():%Y%m%d}"
+        rel, st = fc.relatorio(inc["contrato"], meta, ativos, fc.ENTREGA / sufixo, sufixo, so_cpfs=cpfs, odonto=False)
+        print(f"[inclusao {inc['id']}] relatório {rel.name}: {st}")
+        return rel
+    except Exception as e:
+        print(f"[inclusao {inc['id']}] relatório final falhou ({type(e).__name__}: {e})")
+        return None
+
+
 def finalizar(cur, inc: dict, motivo: str, simular: bool, avisar_gestor: bool = False) -> None:
     ativas = len(inc["ativas"])
     encerradas = len({v["cpf"] for v in inc["vidas"] if v.get("cpf")}) - ativas
@@ -291,6 +371,20 @@ def finalizar(cur, inc: dict, motivo: str, simular: bool, avisar_gestor: bool = 
     destinos = [inc["solicitante_upn"]] + ([_gestor(cur)] if avisar_gestor else [])
     for upn in filter(None, dict.fromkeys(destinos)):
         _cora("/notificar-cartao", {"upn": upn, **corpo})
+    # o relatório faz login no portal (1–2 min): fora da requisição do botão Finalizar; thread não-daemon (o cron espera)
+    threading.Thread(target=enviar_relatorio, args=(dict(inc), list(filter(None, dict.fromkeys(destinos)))),
+                     daemon=False).start()
+
+
+def enviar_relatorio(inc: dict, destinos: list[str]) -> None:
+    rel = relatorio_final(inc)
+    if not rel:
+        return
+    for upn in destinos:
+        _cora("/notificar-arquivo", {"upn": upn, "texto": f"📋 Relatório da inclusão — {_rotulo(inc)}: uma linha por vida, "
+                                     "com Status (Ativo / Em processamento / Não ativo) e o Problema do que não entrou.",
+                                     "arquivo_base64": base64.b64encode(rel.read_bytes()).decode("ascii"),
+                                     "nome_arquivo": rel.name})
 
 
 # ── laço principal ─────────────────────────────────────────────────────────────────────────────────────
@@ -299,10 +393,12 @@ def processar(cur, inc: dict, agora: datetime, simular: bool) -> None:
     ult = _naive(inc["ultima_conferencia_em"])
     if agora - criada >= PRIMEIRA_CONFERENCIA and (ult is None or agora - ult >= CONFERIR_A_CADA):
         try:
-            novas = conferir_ativas(inc, simular)
+            novas, cancelados = conferir_ativas(inc, simular)
         except Exception as e:
             print(f"[inclusao {inc['id']}] conferência falhou ({type(e).__name__}: {e}); tento na próxima rodada")
-            novas = None
+            novas, cancelados = None, {}
+        if cancelados:
+            reanalisar_cancelados(inc, cancelados, simular)
         if novas is not None:
             gravar_ativas(inc, novas, simular)
             agora_iso = agora.isoformat(timespec="seconds")

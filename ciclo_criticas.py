@@ -150,8 +150,13 @@ def rodar(contrato: str, controles: list[str], contexto: dict, notificar: bool =
             # aprovação e sem avisar o pós-vendas. Falha técnica vai pro André; quem já entrou sai da carga.
             try:
                 r["reenvio"] = aprovar(r["execucao_id"], "AUTOMATICO", r["responsavel"]["upn"], sistema=True)
-            except Recusa as erro:
+            except Exception as erro:   # 19/10/2026: qualquer falha fica registrada; a falha técnica volta pelo retentar
                 r["reenvio"] = {"enviado": False, "erro": str(erro)}
+                if isinstance(erro, Recusa):
+                    if "não consegui conferir" not in str(erro):   # essa já ficou marcada pra retentativa
+                        _evento_reenvio(r["execucao_id"], "REENVIO_RECUSADO", str(erro))
+                else:
+                    _marcar_reenvio_pendente_eid(r["execucao_id"], r["responsavel"]["upn"], f"{type(erro).__name__}: {erro}")
                 _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"⚠️ Reenvio automático do motor não subiu "
                                      f"({r['contrato']}/{r['controle']}, execução {r['execucao_id']}): {erro}"})
             print("[ciclo] reenvio automático", r["execucao_id"], json.dumps(r["reenvio"], default=str)[:300])
@@ -306,7 +311,7 @@ def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> 
         try:
             with coleta_portal.sessao(contrato) as (page, headers):
                 conf = coleta_portal.conferir_antes_de_reenviar(page, headers, contrato, cpfs, desde, controles)
-        except coleta_portal.ConferenciaInvalida as erro:
+        except Exception as erro:   # 19/10/2026 (G3W63, exec 60): login que falha também — antes a carga morria calada
             # 16/10/2026: nada subiu -> é seguro repetir; o cron do ciclo (retentar_reenvios) tenta de novo sozinho
             _marcar_reenvio_pendente(conn_s, eid, escopo, aprovado_por, sistema, str(erro))
             raise Recusa(f"não consegui conferir na Hapvida ({erro}) — sem conferência eu não subo nada. "
@@ -386,11 +391,52 @@ def _marcar_reenvio_pendente(conn_s, eid: int, escopo: str, por: str, sistema: b
     conn_s.commit()
 
 
-def retentar_reenvios() -> list[dict]:
-    """Reenvios que pararam porque o portal não deixou conferir (nada subiu). Tenta de novo; sucesso limpa a marca;
-    depois de MAX_RETENTATIVAS avisa o André uma vez e para."""
+def _evento_reenvio(eid: int, tipo: str, texto: str) -> None:
     conn_s = conectar_saneamento()
     try:
+        with conn_s, conn_s.cursor() as cur:
+            cur.execute("INSERT INTO saneamento.evento (execucao_id, tipo, detalhe, ator) VALUES (%s,%s,%s,%s)",
+                        (eid, tipo, json.dumps({"erro": texto[:300]}), "SISTEMA"))
+    finally:
+        conn_s.close()
+
+
+def _marcar_reenvio_pendente_eid(eid: int, por: str, erro: str) -> None:
+    conn_s = conectar_saneamento()
+    try:
+        _marcar_reenvio_pendente(conn_s, eid, "AUTOMATICO", por, True, erro)
+    finally:
+        conn_s.close()
+
+
+# 19/10/2026 (G3W63 exec 60, 4DFEV exec 14, 2XP6W exec 49): carga automática pronta que nunca subiu nem foi recusada.
+# Vigia só a partir desta data (as antigas foram fechadas à mão pelo /fechar-contrato).
+VIGIA_CARGA_DESDE = "2026-10-20"
+ORIGENS_AUTOMATICAS = ("VIGIA_INCLUSAO", "CORRECAO_POS_VENDAS")
+
+
+def cargas_paradas(conn_s) -> list[tuple[int, str]]:
+    """(execução, aprovador) das cargas AUTOMATICO de origem automática concluídas há mais de 1h sem desfecho."""
+    with conn_s.cursor() as cur:
+        cur.execute("""SELECT e.id, e.aprovador FROM saneamento.execucao e
+                        WHERE e.status = 'CONCLUIDA' AND e.criado_em >= %s AND e.criado_em < now() - interval '1 hour'
+                          AND e.contexto ->> 'origem' = ANY(%s) AND e.aprovador IS NOT NULL
+                          AND NOT (coalesce(e.contexto, '{}'::jsonb) ? 'reenvio_pendente')
+                          AND EXISTS (SELECT 1 FROM saneamento.nova_carga n WHERE n.execucao_id = e.id AND n.escopo = 'AUTOMATICO')
+                          AND NOT EXISTS (SELECT 1 FROM saneamento.evento v WHERE v.execucao_id = e.id
+                                           AND v.tipo IN ('LOTE_ENVIADO', 'LOTE_DESCARTADO', 'REENVIO_RECUSADO'))
+                        ORDER BY e.id""", (VIGIA_CARGA_DESDE, list(ORIGENS_AUTOMATICAS)))
+        return cur.fetchall()
+
+
+def retentar_reenvios() -> list[dict]:
+    """Reenvios que pararam porque o portal não deixou conferir (nada subiu). Tenta de novo; sucesso limpa a marca;
+    depois de MAX_RETENTATIVAS avisa o André uma vez e para. 19/10/2026: antes, marca as cargas automáticas paradas."""
+    conn_s = conectar_saneamento()
+    try:
+        for eid, por in cargas_paradas(conn_s):
+            print(f"[reenvio] execução {eid}: carga automática parada sem desfecho — entra na retentativa")
+            _marcar_reenvio_pendente(conn_s, eid, "AUTOMATICO", por, True, "carga automática parada sem desfecho")
         with conn_s.cursor() as cur:
             cur.execute("""SELECT id, contexto -> 'reenvio_pendente' FROM saneamento.execucao
                             WHERE status = 'CONCLUIDA' AND contexto ? 'reenvio_pendente' ORDER BY id""")
@@ -405,6 +451,15 @@ def retentar_reenvios() -> list[dict]:
             r = aprovar(eid, pend["escopo"], pend["por"], sistema=bool(pend.get("sistema")))
         except Recusa as erro:
             r = {"enviado": False, "erro": str(erro)}
+            if "não consegui conferir" not in str(erro):
+                _evento_reenvio(eid, "REENVIO_RECUSADO", str(erro))
+        except Exception as erro:   # 19/10/2026: falha inesperada conta como tentativa, não derruba o laço
+            r = {"enviado": False, "erro": f"não consegui conferir ({type(erro).__name__}: {erro})"}
+            conn_t = conectar_saneamento()
+            try:   # conta a tentativa (senão repetiria pra sempre)
+                _marcar_reenvio_pendente(conn_t, eid, pend["escopo"], pend["por"], bool(pend.get("sistema")), r["erro"])
+            finally:
+                conn_t.close()
         print("[reenvio] execução", eid, json.dumps(r, default=str)[:300])
         portal_fora = "não consegui conferir" in (r.get("erro") or "")
         if not portal_fora:   # subiu, ou recusa definitiva (já no contrato / duplicado / já enviada): não repete
