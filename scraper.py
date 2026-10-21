@@ -312,11 +312,14 @@ def registrar_fonte_atualizacao() -> None:
 
 
 def run_all() -> dict:
+    import comissao_detalhe  # importa scraper; aqui dentro para não virar import circular
+
     project = os.environ["GCP_PROJECT"]
     hoje = date.today()
     anos = [hoje.year, hoje.year - 1]
 
     erros: list[dict] = []
+    detalhe: dict[str, dict] = {}
     # #124: comissao migrou pra dentro de "lifetools" — dbname explícito (não usa mais o
     # PGDATABASE=hapvida do .env, que era só pra esta conexão; nenhum outro script deste
     # container lê PGDATABASE implicitamente. A variável em si fica vestigial no .env até
@@ -340,7 +343,9 @@ def run_all() -> dict:
                         erros.append({"codigo": codigo, "erro": f"secret: {e}"})
                         continue
 
-                    page = browser.new_page()
+                    # contexto próprio: o download do detalhe abre uma segunda aba na mesma sessão
+                    ctx = browser.new_context(accept_downloads=True)
+                    page = ctx.new_page()
                     try:
                         adapter = HapvidaAdapter(page)
                         sessao = adapter.login(creds["usuario"], creds["senha"])
@@ -366,10 +371,24 @@ def run_all() -> dict:
                                     sessao = adapter.login(
                                         creds["usuario"], creds["senha"]
                                     )
+
+                        # 21/10/2026: detalhe por contrato de cada lote (comissoes_detalhe), na mesma
+                        # sessão. Só tinha rodado à mão em 17/09 e ficou parado em 11/09. Best-effort:
+                        # falha aqui vira erro do código, nunca derruba a checagem de pedidos.
+                        try:
+                            r = comissao_detalhe.coletar(
+                                page, sessao, conn, codigo, comissao_detalhe.meses_recentes(hoje)
+                            )
+                            detalhe[codigo] = r
+                            for msg in r["erros"]:
+                                erros.append({"codigo": codigo, "erro": f"detalhe: {msg}"})
+                        except Exception as e:
+                            conn.rollback()
+                            erros.append({"codigo": codigo, "erro": f"detalhe: {e}"})
                     except Exception as e:
                         erros.append({"codigo": codigo, "erro": str(e)})
                     finally:
-                        page.close()
+                        ctx.close()
             finally:
                 browser.close()
 
@@ -380,4 +399,5 @@ def run_all() -> dict:
     registrar_fonte_atualizacao()
 
     summary["erros"] = erros
+    summary["detalhe"] = detalhe
     return summary
