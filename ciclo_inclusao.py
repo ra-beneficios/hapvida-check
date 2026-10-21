@@ -335,9 +335,23 @@ def txt_odonto(inc: dict, premium: str) -> tuple[bytes, str] | None:
     return base64.b64decode(j["arquivo_txt_base64"]), f"ODONTO_PREMIUM_{premium}_{inc['contrato']}_{inc['id']}.txt"
 
 
+_RELATORIO_LOCK = threading.Lock()
+
+
 def relatorio_final(inc: dict) -> Path | None:
     """O mesmo relatório do /fechar-contrato (49 colunas + Status + Problema), só com as vidas desta inclusão
-    (André, 19/10/2026). Falha aqui não impede o card final."""
+    (André, 19/10/2026). Falha aqui não impede o card final.
+    21/10/2026: um por vez — duas inclusões finalizadas juntas trocavam o contrato da sessão (8DAC9 leu as
+    movimentações do 4DFEV e saiu com 0 vidas)."""
+    with _RELATORIO_LOCK:
+        for _ in range(2):
+            rel = _relatorio_final(inc)
+            if rel is not None:
+                return rel
+        return None
+
+
+def _relatorio_final(inc: dict) -> Path | None:
     try:
         from saneamento.ferramentas import fechar_contrato as fc
         with coleta_portal.sessao(inc["contrato"]) as (page, headers):
@@ -350,6 +364,9 @@ def relatorio_final(inc: dict) -> Path | None:
         sufixo = f"{inc['contrato']}_INCLUSAO_{inc['id']}_{datetime.now():%Y%m%d}"
         rel, st = fc.relatorio(inc["contrato"], meta, ativos, fc.ENTREGA / sufixo, sufixo, so_cpfs=cpfs, odonto=False)
         print(f"[inclusao {inc['id']}] relatório {rel.name}: {st}")
+        if cpfs and not st:
+            print(f"[inclusao {inc['id']}] relatório vazio com {len(cpfs)} vidas na inclusão; tento de novo")
+            return None
         return rel
     except Exception as e:
         print(f"[inclusao {inc['id']}] relatório final falhou ({type(e).__name__}: {e})")
