@@ -60,5 +60,10 @@ ok(callable(getattr(ciclo_inclusao, "reanalisar_cancelados", None)) and callable
    "inclusão: pedido cancelado + relatório final")
 ok(callable(getattr(fechar_contrato, "relatorio", None)), "fechar_contrato.relatorio na imagem")
 ok(tuple(int(x) for x in VERSAO_MOTOR.split(".")) >= (0, 4, 6), f"motor >= 0.4.6 ({VERSAO_MOTOR})")
+# 21/10/2026: mensagens do pós-vendas retidas com o André até liberar (POS_VENDAS_RETIDO=0)
+import retencao  # noqa: E402
+_r = retencao.destino({"upn": "pos.vendas@exemplo", "texto": "x"})
+ok(not retencao.RETIDO or (_r["upn"] == retencao.ADMIN and "era para pos.vendas@exemplo" in _r["texto"]),
+   f"retenção do pós-vendas ({'ligada' if retencao.RETIDO else 'desligada'})")
 print("motor", VERSAO_MOTOR)
 sys.exit(1 if falhas else 0)
