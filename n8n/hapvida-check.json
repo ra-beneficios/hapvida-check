@@ -7,7 +7,10 @@
       "name": "Schedule - Checagem Diaria",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-600, 0],
+      "position": [
+        -600,
+        0
+      ],
       "parameters": {
         "rule": {
           "interval": [
@@ -24,7 +27,11 @@
       "name": "HTTP - Rodar Checagem Hapvida",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-360, 0],
+      "onError": "continueRegularOutput",
+      "position": [
+        -360,
+        0
+      ],
       "parameters": {
         "method": "POST",
         "url": "http://hapvida-check:8000/run",
@@ -34,17 +41,35 @@
       }
     },
     {
-      "id": "if_tem_novidade",
-      "name": "Ha Novos ou Atrasados?",
+      "id": "code_montar_email_ra",
+      "name": "Montar E-mail RA (128A, 05FK)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        -150
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const CODIGOS = ['128A', '05FK'];\nconst PREFIXO = 'RA';\n\nconst data = $input.first().json;\n\nfunction formatBRL(v) {\n  return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n}\n\nfunction formatData(iso) {\n  return iso.split('-').reverse().join('/');\n}\n\nfunction buildTable(rows, comDiasEmAberto) {\n  const header = '<tr><th>Concessionaria</th><th>No Pedido</th><th>Lote</th><th>Data Integracao</th><th>Valor</th>' + (comDiasEmAberto ? '<th>Dias em Aberto</th>' : '') + '</tr>';\n  const body = rows.map((r) => {\n    return '<tr><td>' + r.codigo_concessionaria + '</td><td>' + r.numero_pedido + '</td><td>' + (r.lote || '-') + '</td><td>' + formatData(r.data_integracao) + '</td><td>' + formatBRL(r.valor) + '</td>' + (comDiasEmAberto ? '<td>' + r.dias_em_aberto + '</td>' : '') + '</tr>';\n  }).join('');\n  return '<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">' + header + body + '</table>';\n}\n\nconst novos = (data.novos || []).filter((r) => CODIGOS.includes(r.codigo_concessionaria));\nconst atrasados = (data.atrasados || []).filter((r) => CODIGOS.includes(r.codigo_concessionaria));\n\nlet secoes = '';\n\nif (novos.length) {\n  secoes += '<h3>Pedidos novos hoje (' + novos.length + ')</h3>' + buildTable(novos, false);\n}\n\nif (atrasados.length) {\n  secoes += '<h3>Pedidos em aberto atrasados (' + atrasados.length + ')</h3>' + buildTable(atrasados, true);\n}\n\nconst hoje = new Date().toLocaleDateString('pt-BR');\nconst corpoHtml = '<p>Resumo da checagem de comissoes Hapvida (' + CODIGOS.join(', ') + ') em ' + hoje + ':</p>' + secoes;\nconst assunto = PREFIXO + ' - Hapvida - Comissoes a resgatar - ' + hoje;\n\nreturn [{ json: { assunto, corpoHtml, novos_count: novos.length, atrasados_count: atrasados.length } }];"
+      }
+    },
+    {
+      "id": "if_ra_novidade",
+      "name": "RA - Ha Novos ou Atrasados?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
-      "position": [-120, 0],
+      "position": [
+        120,
+        -150
+      ],
       "parameters": {
         "conditions": {
           "combinator": "or",
           "conditions": [
             {
-              "id": "cond_novos",
+              "id": "cond_novos_ra",
               "leftValue": "={{ $json.novos_count }}",
               "rightValue": 0,
               "operator": {
@@ -53,7 +78,7 @@
               }
             },
             {
-              "id": "cond_atrasados",
+              "id": "cond_atrasados_ra",
               "leftValue": "={{ $json.atrasados_count }}",
               "rightValue": 0,
               "operator": {
@@ -73,23 +98,14 @@
       }
     },
     {
-      "id": "code_montar_email",
-      "name": "Montar E-mail",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [120, -100],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const data = $input.first().json;\n\nfunction formatBRL(v) {\n  return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n}\n\nfunction formatData(iso) {\n  return iso.split('-').reverse().join('/');\n}\n\nfunction buildTable(rows, comDiasEmAberto) {\n  const header = '<tr><th>Concessionaria</th><th>No Pedido</th><th>Lote</th><th>Data Integracao</th><th>Valor</th>' + (comDiasEmAberto ? '<th>Dias em Aberto</th>' : '') + '</tr>';\n  const body = rows.map((r) => {\n    return '<tr><td>' + r.codigo_concessionaria + '</td><td>' + r.numero_pedido + '</td><td>' + (r.lote || '-') + '</td><td>' + formatData(r.data_integracao) + '</td><td>' + formatBRL(r.valor) + '</td>' + (comDiasEmAberto ? '<td>' + r.dias_em_aberto + '</td>' : '') + '</tr>';\n  }).join('');\n  return '<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">' + header + body + '</table>';\n}\n\nlet secoes = '';\n\nif (data.novos && data.novos.length) {\n  secoes += '<h3>Pedidos novos hoje (' + data.novos.length + ')</h3>' + buildTable(data.novos, false);\n}\n\nif (data.atrasados && data.atrasados.length) {\n  secoes += '<h3>Pedidos em aberto atrasados (' + data.atrasados.length + ')</h3>' + buildTable(data.atrasados, true);\n}\n\nconst hoje = new Date().toLocaleDateString('pt-BR');\nconst corpoHtml = '<p>Resumo da checagem de comissoes Hapvida em ' + hoje + ':</p>' + secoes;\nconst assunto = 'Hapvida - Comissoes a resgatar - ' + hoje;\n\nreturn [{ json: { assunto, corpoHtml } }];"
-      }
-    },
-    {
-      "id": "outlook_send_financeiro",
-      "name": "Graph - Notificar Financeiro (noreply)",
+      "id": "graph_send_ra",
+      "name": "Graph - Notificar Financeiro RA (noreply)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [360, -100],
+      "position": [
+        360,
+        -150
+      ],
       "parameters": {
         "method": "POST",
         "url": "https://graph.microsoft.com/v1.0/users/noreply@ra-beneficios.com.br/sendMail",
@@ -99,6 +115,165 @@
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ message: { subject: $json.assunto, body: { contentType: 'HTML', content: $json.corpoHtml }, toRecipients: [{ emailAddress: { address: 'financeiro@ra-beneficios.com.br' } }] }, saveToSentItems: false }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "7eV3EqGLzMsJYPNp",
+          "name": "Microsoft Graph - App Only (noreply)"
+        }
+      }
+    },
+    {
+      "id": "code_montar_email_avr",
+      "name": "Montar E-mail AVR (474A, 513A)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        150
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const CODIGOS = ['474A', '513A'];\nconst PREFIXO = 'AVR';\n\nconst data = $input.first().json;\n\nfunction formatBRL(v) {\n  return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n}\n\nfunction formatData(iso) {\n  return iso.split('-').reverse().join('/');\n}\n\nfunction buildTable(rows, comDiasEmAberto) {\n  const header = '<tr><th>Concessionaria</th><th>No Pedido</th><th>Lote</th><th>Data Integracao</th><th>Valor</th>' + (comDiasEmAberto ? '<th>Dias em Aberto</th>' : '') + '</tr>';\n  const body = rows.map((r) => {\n    return '<tr><td>' + r.codigo_concessionaria + '</td><td>' + r.numero_pedido + '</td><td>' + (r.lote || '-') + '</td><td>' + formatData(r.data_integracao) + '</td><td>' + formatBRL(r.valor) + '</td>' + (comDiasEmAberto ? '<td>' + r.dias_em_aberto + '</td>' : '') + '</tr>';\n  }).join('');\n  return '<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">' + header + body + '</table>';\n}\n\nconst novos = (data.novos || []).filter((r) => CODIGOS.includes(r.codigo_concessionaria));\nconst atrasados = (data.atrasados || []).filter((r) => CODIGOS.includes(r.codigo_concessionaria));\n\nlet secoes = '';\n\nif (novos.length) {\n  secoes += '<h3>Pedidos novos hoje (' + novos.length + ')</h3>' + buildTable(novos, false);\n}\n\nif (atrasados.length) {\n  secoes += '<h3>Pedidos em aberto atrasados (' + atrasados.length + ')</h3>' + buildTable(atrasados, true);\n}\n\nconst hoje = new Date().toLocaleDateString('pt-BR');\nconst corpoHtml = '<p>Resumo da checagem de comissoes Hapvida (' + CODIGOS.join(', ') + ') em ' + hoje + ':</p>' + secoes;\nconst assunto = PREFIXO + ' - Hapvida - Comissoes a resgatar - ' + hoje;\n\nreturn [{ json: { assunto, corpoHtml, novos_count: novos.length, atrasados_count: atrasados.length } }];"
+      }
+    },
+    {
+      "id": "if_avr_novidade",
+      "name": "AVR - Ha Novos ou Atrasados?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        120,
+        150
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "cond_novos_avr",
+              "leftValue": "={{ $json.novos_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "cond_atrasados_avr",
+              "leftValue": "={{ $json.atrasados_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "graph_send_avr",
+      "name": "Graph - Notificar Financeiro AVR (noreply)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        360,
+        150
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/users/noreply@ra-beneficios.com.br/sendMail",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: { subject: $json.assunto, body: { contentType: 'HTML', content: $json.corpoHtml }, toRecipients: [{ emailAddress: { address: 'financeiro@ra-beneficios.com.br' } }] }, saveToSentItems: false }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "7eV3EqGLzMsJYPNp",
+          "name": "Microsoft Graph - App Only (noreply)"
+        }
+      }
+    },
+    {
+      "id": "p36-montar",
+      "name": "Montar Aviso André (login)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        400
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// P36 (21/10/2026): avisa o André quando a checagem não consegue entrar num código.\n// Erros \"detalhe:\" (lote sem relatório sintético etc.) não são falha de login: ficam de fora.\nconst data = $input.first().json;\nconst falhas = [];\nif (data.error) falhas.push({ codigo: 'todos', erro: 'a checagem (/run) falhou: ' + (data.error.message || JSON.stringify(data.error)) });\nfor (const e of (data.erros || [])) {\n  if (!String(e.erro || '').startsWith('detalhe:')) falhas.push(e);\n}\nconst linhas = falhas.map((f) => '<li><b>' + f.codigo + '</b>' + (f.ano ? ' (' + f.ano + ')' : '') + ': ' + String(f.erro).slice(0, 300) + '</li>').join('');\nconst hoje = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });\nreturn [{ json: {\n  falhas_count: falhas.length,\n  assunto: 'Comissão Hapvida: login falhou em ' + falhas.map((f) => f.codigo).join(', ') + ' (' + hoje + ')',\n  corpoHtml: '<p>A checagem diária de comissões não conseguiu entrar nestes códigos, e os pedidos deles não foram atualizados hoje:</p><ul>' + linhas + '</ul><p>Se a senha mudou, atualize no Bitwarden.</p>',\n} }];"
+      }
+    },
+    {
+      "id": "p36-if",
+      "name": "André - Houve Falha de Login?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        80,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond_falhas_p36",
+              "leftValue": "={{ $json.falhas_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "p36-graph",
+      "name": "Graph - Avisar André (noreply)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/users/noreply@ra-beneficios.com.br/sendMail",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: { subject: $json.assunto, body: { contentType: 'HTML', content: $json.corpoHtml }, toRecipients: [{ emailAddress: { address: 'andre.aguiar@ra-beneficios.com.br' } }] }, saveToSentItems: false }) }}",
         "options": {}
       },
       "credentials": {
@@ -125,29 +300,83 @@
       "main": [
         [
           {
-            "node": "Ha Novos ou Atrasados?",
+            "node": "Montar E-mail RA (128A, 05FK)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Montar E-mail AVR (474A, 513A)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Montar Aviso André (login)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Ha Novos ou Atrasados?": {
+    "Montar E-mail RA (128A, 05FK)": {
       "main": [
         [
           {
-            "node": "Montar E-mail",
+            "node": "RA - Ha Novos ou Atrasados?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Montar E-mail": {
+    "RA - Ha Novos ou Atrasados?": {
       "main": [
         [
           {
-            "node": "Graph - Notificar Financeiro (noreply)",
+            "node": "Graph - Notificar Financeiro RA (noreply)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar E-mail AVR (474A, 513A)": {
+      "main": [
+        [
+          {
+            "node": "AVR - Ha Novos ou Atrasados?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AVR - Ha Novos ou Atrasados?": {
+      "main": [
+        [
+          {
+            "node": "Graph - Notificar Financeiro AVR (noreply)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Aviso André (login)": {
+      "main": [
+        [
+          {
+            "node": "André - Houve Falha de Login?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "André - Houve Falha de Login?": {
+      "main": [
+        [
+          {
+            "node": "Graph - Avisar André (noreply)",
             "type": "main",
             "index": 0
           }
@@ -158,6 +387,5 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "pinData": {},
-  "staticData": {}
+  "active": true
 }
