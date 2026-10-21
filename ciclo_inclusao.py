@@ -27,6 +27,8 @@ from pathlib import Path
 import psycopg2
 import psycopg2.extras
 import requests
+
+import retencao
 from openpyxl import load_workbook
 
 sys.path.insert(0, os.environ.get("SANEAMENTO_PATH", "/lifetools_service"))
@@ -61,7 +63,7 @@ def _conn():
 
 def _cora(rota: str, corpo: dict) -> bool:
     try:
-        r = requests.post(f"{CORA}{rota}", json=corpo, timeout=120)
+        r = requests.post(f"{CORA}{rota}", json=retencao.destino(corpo), timeout=120)
         return r.ok and (r.json() or {}).get("enviado", True) is not False
     except Exception as e:
         print(f"[inclusao] Cora {rota} falhou: {e}")

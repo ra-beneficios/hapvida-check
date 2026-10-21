@@ -35,6 +35,7 @@ import requests
 
 sys.path.append("/app")
 import movimentacao_saude as ms
+import retencao
 
 DB = dict(
     host=os.getenv("DB_HOST", "postgres"),
@@ -253,7 +254,7 @@ def lembrar_ondas_pendentes(cur, agora: datetime.datetime | None = None, simular
             arquivo = {k: dep[k] for k in ("contrato", "onda", "linhas", "hash", "arquivo")} | {"vidas": []}
             try:
                 r = requests.post(CORA_LEMBRAR_ONDA_URL, timeout=30,
-                                  json={"upn": estado["solicitante_upn"], "lote": lote_id, "arquivos": [arquivo], "texto": texto})
+                                  json=retencao.destino({"upn": estado["solicitante_upn"], "lote": lote_id, "arquivos": [arquivo], "texto": texto}))
                 entregue = r.ok and r.json().get("enviado") is True
             except Exception as e:
                 print(f"[lembrete-onda] {lote_id}: falha chamando a Cora: {e}")
@@ -276,7 +277,7 @@ def notificar(upn: str, texto: str) -> bool:
     if not upn:
         return False
     try:
-        resp = requests.post(CORA_NOTIFICAR_URL, json={"upn": upn, "texto": texto}, timeout=15)
+        resp = requests.post(CORA_NOTIFICAR_URL, json=retencao.destino({"upn": upn, "texto": texto}), timeout=15)
         # 13/10: 200 nao basta - a Cora responde {"enviado": false} quando a DM nao saiu
         return resp.ok and resp.json().get("enviado") is True
     except Exception as e:
@@ -303,12 +304,12 @@ def notificar_com_relatorio(
 
         resp_cora = requests.post(
             CORA_NOTIFICAR_ARQUIVO_URL,
-            json={
+            json=retencao.destino({
                 "upn": upn,
                 "texto": texto,
                 "arquivo_base64": xlsx_base64,
                 "nome_arquivo": f"Criticas_{codigo_contrato}_{control_code}.xlsx",
-            },
+            }),
             timeout=15,
         )
         return resp_cora.ok and resp_cora.json().get("enviado") is True

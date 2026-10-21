@@ -31,6 +31,7 @@ import psycopg2
 import requests
 
 import movimentacao_saude as ms
+import retencao
 
 sys.path.insert(0, os.environ.get("SANEAMENTO_PATH", "/lifetools_service"))
 from saneamento import ciclo, coleta_portal, correcao, layout, persistencia  # noqa: E402
@@ -80,7 +81,7 @@ def _conn_leitura():
 
 def _cora(rota: str, corpo: dict) -> bool:
     try:
-        return requests.post(f"{CORA}{rota}", json=corpo, timeout=30).ok
+        return requests.post(f"{CORA}{rota}", json=retencao.destino(corpo), timeout=30).ok
     except Exception as e:
         print(f"[ciclo] falha ao chamar a Cora {rota}: {type(e).__name__}")
         return False
