@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.21-5 (21/10/2026) — hapvida-check 2a7c27b + lifetools 3c3b85e · reverter: hc-2026.10.21-4
+- Ciclo de inclusão: relatório final um por vez e refeito se sair vazio (8DAC9 inclusão 2 saiu com 0 vidas porque duas finalizações simultâneas trocaram o contrato da sessão).
+
 ## hc-2026.10.21-4 (21/10/2026) — hapvida-check 4c081c5 + lifetools 3c3b85e · reverter: hc-2026.10.21-3
 - Motor 0.4.7: cidade de CEP único (Tanguá) usa o CEP da agência dos Correios XXXXX-970 que a Hapvida aceita, na consulta ao vivo da porta de entrada e na correção de crítica.
 
