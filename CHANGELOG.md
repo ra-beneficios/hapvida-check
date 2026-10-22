@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.22-1 (22/10/2026) — hapvida-check 1766132 + lifetools 78f90a8 · reverter: hc-2026.10.21-5
+- Motor 0.4.8 (estado civil inválido com data de casamento vira casado, FHMWR) + 0.4.9 (críticas do Legado no catálogo: 499, 372/373, 017/119, 020/022 RG sem órgão/UF, pedido pendente/digitado, 156f outra empresa do grupo). API lifetools reconstruída junto (porta de entrada).
+
 ## hc-2026.10.21-5 (21/10/2026) — hapvida-check 2a7c27b + lifetools 3c3b85e · reverter: hc-2026.10.21-4
 - Ciclo de inclusão: relatório final um por vez e refeito se sair vazio (8DAC9 inclusão 2 saiu com 0 vidas porque duas finalizações simultâneas trocaram o contrato da sessão).
 
