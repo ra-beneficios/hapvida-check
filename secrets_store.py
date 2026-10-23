@@ -1,8 +1,9 @@
 """Leitura de segredos (credenciais de portal, app Graph) independente da nuvem.
 
-SECRETS_BACKEND=gcp    (padrao) Google Secret Manager; projeto em GCP_PROJECT
+SECRETS_BACKEND=file   (padrao) arquivo JSON {nome: {...}} em SECRETS_FILE (permissao 600, montado so-leitura); nao depende de nuvem
 SECRETS_BACKEND=azure  Azure Key Vault; URL em AZURE_KEYVAULT_URL, identidade gerenciada da VM (sem senha)
-SECRETS_BACKEND=file   arquivo JSON {nome: {...}} em SECRETS_FILE (permissao 600, montado so-leitura); nao depende de nuvem
+O Google Secret Manager saiu em 23/10/2026 (saida do GCP; so' o Gemini fica no Google). Copia de referencia: Bitwarden.
+O argumento `project` continua nas assinaturas so' por compatibilidade com quem chama; e' ignorado.
 
 Os nomes dos segredos sao os mesmos nos dois lados (ex.: hapvida-portal-saude). Valor = JSON.
 """
@@ -13,7 +14,7 @@ _client = None
 
 
 def _backend() -> str:
-    return os.environ.get("SECRETS_BACKEND", "gcp").lower()
+    return os.environ.get("SECRETS_BACKEND", "file").lower()
 
 
 def _get_client():
@@ -31,9 +32,7 @@ def _get_client():
 
             _client = SecretClient(vault_url=os.environ["AZURE_KEYVAULT_URL"], credential=DefaultAzureCredential())
         else:
-            from google.cloud import secretmanager
-
-            _client = secretmanager.SecretManagerServiceClient()
+            raise ValueError(f"SECRETS_BACKEND={_backend()} nao existe mais (use file ou azure)")
     return _client
 
 
@@ -41,19 +40,11 @@ def get_json(secret_id: str, project: str | None = None) -> dict:
     client = _get_client()
     if _backend() == "file":
         return client[secret_id]
-    if _backend() == "azure":
-        return json.loads(client.get_secret(secret_id).value)
-    project = project or os.environ["GCP_PROJECT"]
-    name = f"projects/{project}/secrets/{secret_id}/versions/latest"
-    return json.loads(client.access_secret_version(request={"name": name}).payload.data.decode("utf-8"))
+    return json.loads(client.get_secret(secret_id).value)
 
 
 def list_ids(prefix: str = "", project: str | None = None) -> list[str]:
     client = _get_client()
     if _backend() == "file":
         return [i for i in client if i.startswith(prefix)]
-    if _backend() == "azure":
-        return [p.name for p in client.list_properties_of_secrets() if p.name.startswith(prefix)]
-    project = project or os.environ["GCP_PROJECT"]
-    ids = (s.name.split("/")[-1] for s in client.list_secrets(request={"parent": f"projects/{project}"}))
-    return [i for i in ids if i.startswith(prefix)]
+    return [p.name for p in client.list_properties_of_secrets() if p.name.startswith(prefix)]

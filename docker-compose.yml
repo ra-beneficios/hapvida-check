@@ -1,10 +1,10 @@
 services:
   hapvida-check:
     build:
-      context: .
-      # 17/10/2026 (obra 1): motor de críticas e de exclusão vêm do repo lifetools para dentro da imagem
-      additional_contexts:
-        lifetools: /opt/lifetools
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)context: .
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# 17/10/2026 (obra 1): motor de críticas e de exclusão vêm do repo lifetools para dentro da imagem
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)additional_contexts:
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)  lifetools: /opt/lifetools
     image: hapvida-check-hapvida-check:latest
     container_name: hapvida-check
     restart: unless-stopped
@@ -13,53 +13,53 @@ services:
     # (que roda como superadmin) pode nao conseguir mexer neles depois.
     user: "1001:1002"
     environment:
-      GCP_PROJECT: ${GCP_PROJECT}
-      # file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)
-      SECRETS_BACKEND: ${SECRETS_BACKEND:-file}
-      SECRETS_FILE: /run/portais/portais.json
-      PGHOST: ${PGHOST}
-      PGPORT: ${PGPORT}
-      PGDATABASE: ${PGDATABASE}
-      PGUSER: ${PGUSER}
-      PGPASSWORD: ${PGPASSWORD}
-      TZ: ${TZ:-America/Sao_Paulo}
-      MOTOR_EXCLUSAO_PATH: /motor
-      EXCLUSAO_LOTES_DIR: /projeto_ra/movimentacoes/exclusao
-      EXCLUSAO_PRIVADO_DIR: /dados_exclusao
-      DB_HOST: ${DB_HOST}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME}
-      # Ciclo de criticas (08/10/2026): motor do repo lifetools (so' leitura), dados/saidas com PII fora do
-      # SharePoint, schema saneamento no banco de producao (aprovado pelo Andre em 08/10). O vigia so' chama
-      # o ciclo com CICLO_NO_VIGIA=1 (ligar depois do menu validado).
-      SANEAMENTO_PATH: /lifetools_service
-      CICLO_DADOS: /dados_motor
-      SAIDA_MOTOR: /dados_motor/_saidas
-      SANEAMENTO_DB_NAME: ${SANEAMENTO_DB_NAME:-lifetools_dev}
-      SANEAMENTO_PERMITE_PROD: ${SANEAMENTO_PERMITE_PROD:-0}
-      CICLO_NO_VIGIA: ${CICLO_NO_VIGIA:-0}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)GCP_PROJECT: ${GCP_PROJECT}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)SECRETS_BACKEND: ${SECRETS_BACKEND:-file}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)SECRETS_FILE: /run/portais/portais.json
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)PGHOST: ${PGHOST}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)PGPORT: ${PGPORT}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)PGDATABASE: ${PGDATABASE}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)PGUSER: ${PGUSER}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)PGPASSWORD: ${PGPASSWORD}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)TZ: ${TZ:-America/Sao_Paulo}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)MOTOR_EXCLUSAO_PATH: /motor
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)EXCLUSAO_LOTES_DIR: /projeto_ra/movimentacoes/exclusao
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)EXCLUSAO_PRIVADO_DIR: /dados_exclusao
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)DB_HOST: ${DB_HOST}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)DB_USER: ${DB_USER}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)DB_PASSWORD: ${DB_PASSWORD}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)DB_NAME: ${DB_NAME}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# Ciclo de criticas (08/10/2026): motor do repo lifetools (so' leitura), dados/saidas com PII fora do
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# SharePoint, schema saneamento no banco de producao (aprovado pelo Andre em 08/10). O vigia so' chama
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# o ciclo com CICLO_NO_VIGIA=1 (ligar depois do menu validado).
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)SANEAMENTO_PATH: /lifetools_service
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)CICLO_DADOS: /dados_motor
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)SAIDA_MOTOR: /dados_motor/_saidas
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)SANEAMENTO_DB_NAME: ${SANEAMENTO_DB_NAME:-lifetools_dev}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)SANEAMENTO_PERMITE_PROD: ${SANEAMENTO_PERMITE_PROD:-0}
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)CICLO_NO_VIGIA: ${CICLO_NO_VIGIA:-0}
     volumes:
-      # Espelho local do SharePoint "Projeto_RA" (rclone bisync, ~10min) -
-      # onde o processo de envio de documentos grava uma copia de cada
-      # anexo, mesma convencao de nome do Cowork (#152, 31/08/2026).
-      - /opt/projeto_ra/operadoras/hapvida/faturas:/sharepoint/faturas
-      # Procedimento mensal (faturamento_mensal.py, 28/09/2026): handoff pro
-      # Cowork quando falta arquivo do Legado + planilha de contratos ativos
-      # do Legado (so' leitura - o script le Contrato/Empresa/Status, nunca
-      # as colunas de usuario/senha).
-      - /opt/projeto_ra/_handoff/entrada:/projeto_ra/_handoff/entrada
-      - /opt/projeto_ra/operadoras/Access/Hapvida:/projeto_ra/operadoras/Access/Hapvida:ro
-      - ./secrets:/run/portais:ro
-      # Motor de Exclusao (03/10/2026): lotes na pasta padrao (o codigo do motor vai na imagem desde 17/10/2026)
-      # de movimentacoes (sincroniza com o SharePoint) e as fotos de censo/pedidos (dado de TODO o contrato)
-      # numa pasta privada 700 fora do SharePoint.
-      - /opt/projeto_ra/operadoras/hapvida/movimentacoes:/projeto_ra/movimentacoes
-      - /home/superadmin/motor_exclusao_dados/lotes:/dados_exclusao
-      - /home/superadmin/motor_criticas_dados:/dados_motor
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# Espelho local do SharePoint "Projeto_RA" (rclone bisync, ~10min) -
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# onde o processo de envio de documentos grava uma copia de cada
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# anexo, mesma convencao de nome do Cowork (#152, 31/08/2026).
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- /opt/projeto_ra/operadoras/hapvida/faturas:/sharepoint/faturas
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# Procedimento mensal (faturamento_mensal.py, 28/09/2026): handoff pro
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# Cowork quando falta arquivo do Legado + planilha de contratos ativos
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# do Legado (so' leitura - o script le Contrato/Empresa/Status, nunca
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# as colunas de usuario/senha).
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- /opt/projeto_ra/_handoff/entrada:/projeto_ra/_handoff/entrada
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- /opt/projeto_ra/operadoras/Access/Hapvida:/projeto_ra/operadoras/Access/Hapvida:ro
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- ./secrets:/run/portais:ro
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# Motor de Exclusao (03/10/2026): lotes na pasta padrao (o codigo do motor vai na imagem desde 17/10/2026)
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# de movimentacoes (sincroniza com o SharePoint) e as fotos de censo/pedidos (dado de TODO o contrato)
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)# numa pasta privada 700 fora do SharePoint.
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- /opt/projeto_ra/operadoras/hapvida/movimentacoes:/projeto_ra/movimentacoes
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- /home/superadmin/motor_exclusao_dados/lotes:/dados_exclusao
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- /home/superadmin/motor_criticas_dados:/dados_motor
     networks:
-      - n8n_default
-      - lifetools_default
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- n8n_default
+ file (padrao desde a saida do GCP, 29/09/2026) | gcp: credenciais dos portais num JSON 600 fora do git (ver secrets_store.py)- lifetools_default
 
 networks:
   n8n_default:
