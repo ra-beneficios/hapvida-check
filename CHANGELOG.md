@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.23-4 (23/10/2026) — hapvida-check (compose consertado) + lifetools 57f1ba8 · reverter: hc-2026.10.23-3
+- Segredos: Bitwarden é o cofre único. A cópia que o container lê é gerada de hora em hora por `infra/secrets/bitwarden_para_cofre.py` (lifetools); saem `sync_bitwarden_legado/portal.py` e o backend GCP do `secrets_store` (biblioteca do Google fora da imagem). Tentativa anterior se reverteu sozinha (YAML do compose quebrado por um sed meu).
+
 ## hc-2026.10.23-3 (23/10/2026) — hapvida-check dde5d48 + lifetools effb430 · reverter: hc-2026.10.23-2
 - Cadastro único (sessão C, SQL 183): lista do Legado, contratos sem faturamento e mães saem do banco (`cadastro.py`), não mais de `empresas_hapvida.xlsx` nem de listas no código; e-mails do envio só de `contatos_faturamento` (menu Empresas da intranet), a planilha `empresas_contato_email.xlsx` deixou de ser copiada por cima. Escopo conferido igual ao anterior (17 Legado, 34 grupos OUT26).
 
