@@ -7,6 +7,7 @@ import base64
 import tempfile
 
 import boletos_saude
+import cadastro
 import censo_legado
 import censo_saude
 import ciclo_criticas
@@ -72,10 +73,10 @@ def run():
 
 @app.post("/run-censo-legado")
 def run_censo_legado():
-    """Grupo legado (12 Odonto Premium + DAVJV + Z8TUR). Roda em
+    """Grupo legado (portal = LEGADO no cadastro). Roda em
     dry-run - nao commita nada (ver auto_commit.py, ainda nao ativado)."""
     project = os.environ["GCP_PROJECT"]
-    return censo_legado.run_censo_legado(project, censo_legado.CONTRATOS_LEGADO)
+    return censo_legado.run_censo_legado(project, sorted(cadastro.contratos_legado()))
 
 
 @app.post("/run-censo-saude")

@@ -36,9 +36,9 @@ import zipfile
 from datetime import date, datetime
 
 import httpx
-import openpyxl
 import psycopg2
 
+import cadastro
 import enviar_documentos as ed
 import faturamento_mensal as fm
 import padrao_faturamento as pf
@@ -46,9 +46,6 @@ import padrao_faturamento as pf
 BASE = ed.SHAREPOINT_FATURAS_BASE
 STATUS_DIR = os.path.join(BASE, "_status")
 RELATORIO_PARA = ["C-level@ra-beneficios.com.br", "financeiro@ra-beneficios.com.br", "relacionamento@ra-beneficios.com.br"]
-# Contratos sem faturamento proprio (Boaventura, ENUHC, DLIHM, 340ZM) - lista unica em
-# faturamento_mensal.SEM_FATURAMENTO (Andre, 02/10/2026).
-EXCLUIR = fm.SEM_FATURAMENTO
 MODALIDADE = {"SAUDE": "Saúde", "ODONTO_PREMIUM": "Odonto Premium"}
 LIMITE_ENVIO_BYTES = int(3.3 * 1024 * 1024)  # zip de 3,06MB passou em 30/09; acima disso bloqueia
 LISTA_ATIVOS_IDADE_MAX_DIAS = 10
@@ -108,53 +105,10 @@ def status_legado_linhas(comp):
     return res
 
 
-PLANILHA_CONTATOS = "/projeto_ra/operadoras/Access/Hapvida/empresas_contato_email.xlsx"
-_RE_EMAIL = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
-
-
-def sincronizar_contatos(conn):
-    """Planilha de e-mails do faturamento (mantida pelo time no SharePoint) ->
-    contatos_faturamento, antes de cada envio (Andre, 01/10/2026; ate' aqui era
-    manual). Le' todas as colunas da E em diante (UTC tinha e-mail em K/L sem
-    cabecalho). Contrato que ficar sem nenhum e-mail na planilha mantem o que
-    esta' no banco - nunca apaga lista por planilha mal preenchida."""
-    if not os.path.exists(PLANILHA_CONTATOS):
-        log(f"contatos: planilha não encontrada ({PLANILHA_CONTATOS}) - banco mantido")
-        return []
-    ws = openpyxl.load_workbook(PLANILHA_CONTATOS, read_only=True, data_only=True).worksheets[0]
-    with conn.cursor() as cur:
-        cur.execute("SELECT codigo_externo, emails FROM contatos_faturamento")
-        banco = {c: set(e or []) for c, e in cur.fetchall()}
-    mudancas = []
-    with conn.cursor() as cur:
-        for r in list(ws.iter_rows(values_only=True))[1:]:
-            if not r or len(r) < 5 or not r[1]:
-                continue
-            codigo, emails = str(r[1]).strip(), []
-            for v in r[4:]:
-                for e in _RE_EMAIL.findall(str(v or "")):
-                    if e.lower() not in emails:
-                        emails.append(e.lower())
-            if not emails or set(emails) == banco.get(codigo):
-                continue
-            antes = banco.get(codigo, set())
-            cur.execute(
-                """INSERT INTO contatos_faturamento (codigo_externo, empresa_nome, responsavel_ra, emails, fonte, atualizado_em)
-                   VALUES (%s, %s, %s, %s, %s, now())
-                   ON CONFLICT (codigo_externo) DO UPDATE SET emails = EXCLUDED.emails, fonte = EXCLUDED.fonte, atualizado_em = now()""",
-                (codigo, r[2], r[0], emails, f"empresas_contato_email.xlsx ({date.today():%d/%m})"))
-            mudancas.append(f"{codigo}: +{sorted(set(emails) - antes)} -{sorted(antes - set(emails))}")
-    conn.commit()
-    for m in mudancas:
-        log(f"contatos: {m}")
-    log(f"contatos: {len(mudancas)} contrato(s) atualizados da planilha")
-    return mudancas
-
-
 def montar_grupos(conn, comp):
     saude = fm.contratos_saude(comp)            # codigo -> {SAUDE, COPARTICIPACAO}
-    legado = fm.contratos_legado()              # codigo -> empresa (Status=Ativo)
-    escopo = (set(saude) | set(legado)) - EXCLUIR
+    legado = fm.contratos_legado()              # codigo -> empresa (cadastro: Legado ativo com faturamento)
+    escopo = (set(saude) | set(legado)) - cadastro.sem_faturamento()   # envia_faturamento = false no cadastro
     with conn.cursor() as cur:
         cur.execute("""
             SELECT eoc.codigo_externo, eoc.modalidade, coalesce(eoc.unidade, ''), e.id, e.nome
@@ -368,9 +322,9 @@ def main():
     log_envios = json.load(open(caminho_log, encoding="utf-8")) if os.path.exists(caminho_log) else []
     ja = {frozenset(r["codigos"].split("+")) for r in log_envios if r["status"] == "enviado"}
 
+    # E-mails: contatos_faturamento, editado na tela Empresas da intranet (23/10/2026). A planilha
+    # empresas_contato_email.xlsx deixou de ser fonte (era copiada por cima do banco antes de cada envio).
     conn = psycopg2.connect(dbname="lifetools")
-    if enviar:
-        sincronizar_contatos(conn)
     grupos, st = montar_grupos(conn, comp)
     if args.get("codigos"):  # envio avulso de um grupo so' (ex: --codigos=AT2BC)
         so = set(args["codigos"].upper().split(","))

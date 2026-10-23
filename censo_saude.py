@@ -10,26 +10,27 @@ geracao assincrona) -> poll em beneficiaries/status-report ate
 "Processed" -> GET no downloadLink (SAS do Azure Blob, sem header extra)
 -> CSV no formato oficial, pronto pro loader.
 
-MAES_SAUDE: as 2 empresas mae confirmadas na arvore da Carol (#60) -
+Maes: cadastro.maes_portal_moderno() (desde 23/10/2026; era MAES_SAUDE fixo) -
 "Completo" (type=Full) numa mae baixa a arvore inteira (mae + coligadas)
 num arquivo so, testado e confirmado no #59 pra WARQU.
 """
 import time
 
 import httpx
+
+import cadastro
 from playwright.sync_api import sync_playwright
 
 LOGIN_URL = "https://portal-empresa.hapvidagndi.com.br"
 API_BASE = "https://api.hapvida.com.br/b2b/api/v3"
 
-# Tentativa em 31/07 de incluir "DAVJV" aqui foi revertida: a API create-session
+# Historico (31/07, antes da conta da Cora ser master de todos os contratos em 15/10): incluir "DAVJV" foi revertido: a API create-session
 # devolveu 400 Bad Request pra DAVJV como partner-company — confirmado em
 # fonte_atualizacoes que XFP6J/SY8MI (códigos da DAVJV) já estavam corretamente
 # documentados como "Censo Grupo Legado — sessão manual (portal legado, captcha)",
 # um sistema DIFERENTE deste (WARQU/0KFXW usam a API moderna, sem captcha). DAVJV não
 # pertence a este fluxo — a captura dela depende do portal legado, bloqueado por
 # captcha (#77), não é algo que dá pra automatizar por aqui.
-MAES_SAUDE = ["WARQU", "0KFXW"]
 
 POLL_INTERVAL_SECONDS = 3
 POLL_TIMEOUT_SECONDS = 240  # 0KFXW (mãe grande, ~50 coligadas) passou de 90s no #59
@@ -151,7 +152,7 @@ def baixar_relatorio(partner_company: str, auth: dict, tipo: str = "Full") -> by
 
 
 def run_censo_saude(usuario: str, senha: str, maes: list[str] = None) -> dict:
-    maes = maes or MAES_SAUDE
+    maes = maes or cadastro.maes_portal_moderno()
     resultados = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch()

@@ -44,6 +44,7 @@ import psycopg2
 from playwright.sync_api import sync_playwright
 
 import boletos_saude
+import cadastro
 import censo_saude
 import enviar_documentos
 import legado_auto
@@ -53,19 +54,14 @@ import secrets_store
 from censo_saude import login_saude
 
 BASE = enviar_documentos.SHAREPOINT_FATURAS_BASE
-PLANILHA_LEGADO = "/projeto_ra/operadoras/Access/Hapvida/empresas_hapvida.xlsx"
 
 # DAVJV/B6PJX so' abrem com a conta do Marcos/Vinicius (#147) - mesma regra
 # do endpoint /enviar-documentos-contrato.
 # 15/10/2026: DAVJV segue num fluxo próprio (herança de quando só o Vinicios o enxergava), mas com a conta da Cora
 # (ver creds["marco"] em main). B6PJX entra no fluxo normal.
 CODIGOS_CONTA_MARCO = ("DAVJV",)
-# Contratos ativos SEM faturamento proprio pra baixar/enviar (Andre, 02/10/2026):
-# - 9WLZU/9GBKA (Boaventura): fora do envio por decisao gerencial (so' vidas, #150)
-# - ENUHC (LH) e DLIHM (Heftos): ativos, mas sem movimentacao e sem fatura
-# - 340ZM (Sintramon): ativo, fatura paga dentro de outra nota
-# Continuam ativos no banco - so' saem do escopo de faturamento.
-SEM_FATURAMENTO = {"9WLZU", "9GBKA", "ENUHC", "DLIHM", "340ZM"}
+# Contratos ativos SEM faturamento proprio (9WLZU/9GBKA, ENUHC, DLIHM, 340ZM, 6FFNX): desde 23/10/2026 e' a coluna
+# envia_faturamento do cadastro (tela Empresas da intranet) - cadastro.sem_faturamento().
 TENTATIVAS_DOWNLOAD = 3
 PAUSA_ENTRE_TENTATIVAS = 60
 censo_saude.POLL_TIMEOUT_SECONDS = 420  # 0KFXW (~50 coligadas) estoura 240s
@@ -195,24 +191,14 @@ def contratos_saude(comp: str) -> dict[str, set[str]]:
                 por_codigo.setdefault(codigo, set()).add(tipo)
     finally:
         conn.close()
-    return {c: t for c, t in por_codigo.items() if "SAUDE" in t and c not in SEM_FATURAMENTO}
+    fora = cadastro.sem_faturamento()
+    return {c: t for c, t in por_codigo.items() if "SAUDE" in t and c not in fora}
 
 
 def contratos_legado() -> dict[str, str]:
-    """codigo -> empresa, aba 'Contratos (55)' da planilha do Cowork, so'
-    Status=Ativo (os 7 Desativados do AVISO_CLAUDE_CODE.md ficam fora).
-    Le so' Contrato/Empresa/Status - nunca as colunas de usuario/senha."""
-    wb = openpyxl.load_workbook(PLANILHA_LEGADO, read_only=True)
-    ws = next(ws for ws in wb if ws.title.startswith("Contratos"))
-    linhas = ws.iter_rows(values_only=True)
-    cab = [str(h or "").strip() for h in next(linhas)]
-    i_cod, i_emp, i_st = cab.index("Contrato"), cab.index("Empresa (Razão Social)"), cab.index("Status")
-    ativos = {}
-    for r in linhas:
-        if r[i_cod] and str(r[i_st] or "").strip().lower() == "ativo":
-            if str(r[i_cod]).strip() not in SEM_FATURAMENTO:
-                ativos[str(r[i_cod]).strip()] = str(r[i_emp] or "").strip()
-    return ativos
+    """codigo -> empresa dos contratos do Legado que entram no faturamento. Desde 23/10/2026 vem do cadastro
+    (portal = LEGADO, ativo, envia_faturamento); antes era a aba 'Contratos (55)' da planilha do Cowork."""
+    return cadastro.contratos_legado()
 
 
 def status_legado(comp: str) -> dict[str, dict]:
@@ -388,7 +374,7 @@ def salvar_listas_ativos(codigos: dict[str, set[str]], comp: str, modo: str, cre
     mae_de = _maes_dos_codigos(alvo)
     estado = _ler_estado_listas()
     erros = []
-    grupos = [("carol", censo_saude.MAES_SAUDE)]
+    grupos = [("carol", [m for m in cadastro.maes_portal_moderno() if m not in CODIGOS_CONTA_MARCO])]
     if alvo & set(CODIGOS_CONTA_MARCO):
         grupos.append(("marco", ["DAVJV"]))
     for conta, maes in grupos:
@@ -446,7 +432,7 @@ def _maes_dos_codigos(codigos: set[str]) -> dict[str, str | None]:
         with conn.cursor() as cur:
             cur.execute("SELECT codigo_externo, codigo_contrato_mae FROM empresa_operadora_codigos "
                         "WHERE operadora_id = 1 AND codigo_externo = ANY(%s)", (list(codigos),))
-            maes = set(censo_saude.MAES_SAUDE) | {"DAVJV"}
+            maes = set(cadastro.maes_portal_moderno())
             return {c: (m or (c if c in maes else None)) for c, m in cur.fetchall()}
     finally:
         conn.close()

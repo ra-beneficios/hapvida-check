@@ -25,13 +25,7 @@ RATE_LIMIT_SECONDS = 8  # mesmo intervalo do hapvida-check, evita pMsg=008
 
 LOGIN_URL = "https://webhap.hapvida.com.br/pls/webhap/webnewcadastrousuario.login"
 
-# 12 Odonto Premium + DAVJV + Z8TUR (confirmado via
-# empresa_operadora_codigos WHERE modalidade='ODONTO_PREMIUM' OR
-# codigo_externo IN ('DAVJV','Z8TUR'), 25/07/2026)
-CONTRATOS_LEGADO = [
-    "2M2DX", "32I14", "611X2", "BUZ7F", "BY3S8", "BZ3T5", "DAVJV",
-    "HH9PR", "IHWBW", "QTYQH", "S7HNK", "SY8MI", "Y4VLX", "Z8TUR",
-]
+# Lista de contratos: cadastro.contratos_legado() (portal = LEGADO no cadastro; era CONTRATOS_LEGADO fixo ate' 23/10/2026)
 
 
 def login_legado(page, codigo: str, senha: str) -> dict:
