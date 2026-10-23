@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.23-1 (23/10/2026) — hapvida-check 2f6a8e5 + lifetools 7931fed · reverter: hc-2026.10.22-1
+- fechar_contrato: pedidos de inclusão digitados na TELA do portal entram na coleta e no relatório (movements-list só tem arquivos; 43 na 4DFEV ficavam fora — Fernanda, Ana Lara). Ativo pela tela não vai pro TXT do Odonto (sem linha de 829). Conversor da API: estado civil por texto (Divorciado→5 etc.), API reconstruída antes (3f24685).
+
 ## hc-2026.10.22-1 (22/10/2026) — hapvida-check 1766132 + lifetools 78f90a8 · reverter: hc-2026.10.21-5
 - Motor 0.4.8 (estado civil inválido com data de casamento vira casado, FHMWR) + 0.4.9 (críticas do Legado no catálogo: 499, 372/373, 017/119, 020/022 RG sem órgão/UF, pedido pendente/digitado, 156f outra empresa do grupo). API lifetools reconstruída junto (porta de entrada).
 
