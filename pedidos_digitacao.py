@@ -100,14 +100,14 @@ def o_que_trava(page, h, cn: str) -> list[str]:
 
 
 def contratos_saude() -> list[str]:
-    """Contratos Hapvida Saúde com fatura nos últimos 60 dias (mesma base do faturamento)."""
+    """Contratos Hapvida Saúde ativos no cadastro. 23/10/2026 (André): antes só os com fatura nos últimos 60 dias, e
+    contrato novo (G5LXS) e mais 6 ficavam de fora."""
     import ciclo_criticas
     conn = ciclo_criticas._conn_leitura()
     try:
         with conn.cursor() as cur:
-            cur.execute("""SELECT DISTINCT eoc.codigo_externo FROM empresa_operadora_codigos eoc
-                             JOIN faturas f ON f.empresa_operadora_codigo_id = eoc.id
-                            WHERE eoc.operadora_id = 1 AND f.vencimento >= current_date - 60 ORDER BY 1""")
+            cur.execute("""SELECT codigo_externo FROM empresa_operadora_codigos
+                            WHERE operadora_id = 1 AND modalidade = 'SAUDE' AND situacao = 'ATIVO' ORDER BY 1""")
             return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
@@ -162,6 +162,9 @@ if __name__ == "__main__":
         try:
             r = tratar_contrato(ct.upper(), executar)
         except Exception as e:
+            if "nao encontrado na busca" in str(e):   # código que o login da Cora não enxerga (9WLZU, ERQ43, ICBJY, Z8TUR)
+                print(f"{ct}: fora do login do portal - ignorado", flush=True)
+                continue
             r = [{"contrato": ct, "acao": "ERRO", "motivo": f"{type(e).__name__}: {str(e)[:200]}"}]
         for x in r:
             print(json.dumps(x, ensure_ascii=False), flush=True)
