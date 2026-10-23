@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.23-2 (23/10/2026) — hapvida-check 44178fb + lifetools 7931fed · reverter: hc-2026.10.23-1
+- pedidos_digitacao (cron 04:00): todos os contratos Saúde ativos do cadastro (antes só com fatura em 60 dias; G5LXS e mais 6 ficavam fora); código fora do login da Cora (9WLZU, ERQ43, ICBJY, Z8TUR) é ignorado sem alerta.
+
 ## hc-2026.10.23-1 (23/10/2026) — hapvida-check 2f6a8e5 + lifetools 7931fed · reverter: hc-2026.10.22-1
 - fechar_contrato: pedidos de inclusão digitados na TELA do portal entram na coleta e no relatório (movements-list só tem arquivos; 43 na 4DFEV ficavam fora — Fernanda, Ana Lara). Ativo pela tela não vai pro TXT do Odonto (sem linha de 829). Conversor da API: estado civil por texto (Divorciado→5 etc.), API reconstruída antes (3f24685).
 
