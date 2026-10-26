@@ -278,6 +278,9 @@ def _do_mes(venc: date | None, mes: int, ano: int) -> bool:
     return bool(venc) and venc.month == mes and venc.year == ano
 
 
+_RE_VENC_BOLETO = re.compile(r"Vencimento:\s*(\d{2}/\d{2}/\d{4})")
+
+
 def baixar_contrato(codigo: str, empresa: str, cred: dict, comp: str, mes: int, ano: int,
                     pasta: str, plano: str = "ODONTO") -> dict:
     """Baixa o que falta do contrato na pasta da competencia. Devolve
@@ -342,6 +345,21 @@ def baixar_contrato(codigo: str, empresa: str, cred: dict, comp: str, mes: int, 
 
             # 2. boletos (Bemobi) - sempre que houver lista, pelo status
             abertos = etapa("boleto", lambda p: boletos_em_aberto(p, codigo, senha)) if notas else None
+            if abertos:
+                # 26/10/2026: boleto do mes sem NF emitida ainda nao aparece na tela de Nota Fiscal, so' no
+                # Bemobi (2M2DX/Y4VLX NOV26, venc. 10/11). Completa pelo vencimento impresso no boleto.
+                extras = {}
+                for numero, pdf in abertos.items():
+                    m = None if numero in boleto_plano else _RE_VENC_BOLETO.search(_texto_pdf(pdf))
+                    if m and _do_mes(datetime.strptime(m.group(1), "%d/%m/%Y").date(), mes, ano):
+                        extras[numero] = "COPARTICIPACAO" if numero in copart_boletos else plano
+                planos = list(boleto_plano.values()) + list(extras.values())
+                if extras and any(planos.count(p) > 1 for p in set(planos)):
+                    res["avisos"].append(f"boletos de {comp} no Bemobi não separáveis por tipo ({', '.join(extras)}) - nada gravado")
+                elif extras:
+                    boleto_plano.update(extras)
+                    res["avisos"] = [a for a in res["avisos"] if not a.startswith("nenhum boleto com vencimento")]
+                    res["avisos"].append(f"boleto(s) de {comp} só no Bemobi, NF ainda não emitida: {', '.join(extras)}")
             if abertos is not None:
                 vencidos = [n for n in notas if n["boleto_numero"] in abertos and n["vencimento"]
                             and (n["vencimento"].year, n["vencimento"].month) < (ano, mes)]
