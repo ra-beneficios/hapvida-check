@@ -67,7 +67,11 @@ def listar_codigos_grupo_saude() -> list[str]:
     (login diferente, sem relação com a API moderna que WARQU/0KFXW usam), nunca na API
     moderna. Antes disso, os 11 Premium do 0KFXW entravam nesta lista e falhavam com 400
     ("usuário não possui acesso ao contrato X") — não era bug de código, era a API confirmando
-    que esse acesso não existe por este caminho. Regra geral, sem exceção conhecida."""
+    que esse acesso não existe por este caminho. Regra geral, sem exceção conhecida.
+
+    26/10/2026 (André): Odonto Puro nunca tem fatura (SQL 184 trava gera_boleto = false) e contrato do
+    Legado (Z8TUR) não abre sessão no portal moderno - os dois saem. Não filtrar por gera_boleto:
+    F5T8L/59CD2/YXF01 são Saúde com gera_boleto = false e têm fatura."""
     conn = psycopg2.connect(dbname="lifetools")
     try:
         with conn.cursor() as cur:
@@ -75,7 +79,8 @@ def listar_codigos_grupo_saude() -> list[str]:
                 """
                 SELECT DISTINCT codigo_externo FROM vw_contratos
                 WHERE (codigo_contrato_mae IN ('0KFXW', 'WARQU') OR codigo_externo IN ('0KFXW', 'WARQU'))
-                  AND modalidade <> 'ODONTO_PREMIUM'
+                  AND modalidade NOT IN ('ODONTO_PREMIUM', 'ODONTO_PURO')
+                  AND portal = 'MODERNO'
                 ORDER BY codigo_externo
                 """
             )
