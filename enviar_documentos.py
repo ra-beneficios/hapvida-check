@@ -405,7 +405,13 @@ def montar_e_enviar(
         except Exception as e:
             avisos.append(f"Boleto {tipo_label} não pôde ser baixado: {e}")
 
-        nfe = checar_nota_fiscal(auth, codigo, billing_number)
+        # 26/10/2026: o portal responde 202 "Aguardando a geração do relatório" e o _get_com_retry estoura;
+        # sem o try o contrato inteiro caía e o boleto já baixado ia junto (NOV26: 27 de 31 sem boleto).
+        try:
+            nfe = checar_nota_fiscal(auth, codigo, billing_number)
+        except Exception as e:
+            nfe = None
+            avisos.append(f"NF {tipo_label}: consulta falhou ({e}).")
         if nfe and nfe.get("invoicePath"):
             pdf_bytes = _baixar_nfe_pdf(nfe["invoicePath"])
             if pdf_bytes:
@@ -425,7 +431,11 @@ def montar_e_enviar(
 
         if fatura["bill_type"] == "MENSALIDADE PLANO SAUDE":
             for tipo, ext, ct in [("PDF", "pdf", "application/pdf"), ("CSV", "csv", "text/csv")]:
-                rel = checar_relatorio_analitico(auth, codigo, billing_number, tipo)
+                try:
+                    rel = checar_relatorio_analitico(auth, codigo, billing_number, tipo)
+                except Exception as e:
+                    avisos.append(f"Relatório analítico ({tipo}) ainda não disponível no portal: {e}")
+                    continue
                 if rel and rel.get("link"):
                     r = httpx.get(rel["link"], timeout=60)
                     if r.status_code == 200:
@@ -446,9 +456,12 @@ def montar_e_enviar(
                 # PDF vai pro cliente; CSV (mesma fatura) e' fonte do XLSX e da
                 # conferencia total x boleto (regra NOV26, Andre 05/10/2026).
                 for formato, ct in (("PDF", "application/pdf"), ("CSV", "text/csv")):
-                    conteudo, aviso = relatorio_coparticipacao(
-                        auth, codigo, billing_number, fatura["person_number"], fatura["remittence"], formato
-                    )
+                    try:
+                        conteudo, aviso = relatorio_coparticipacao(
+                            auth, codigo, billing_number, fatura["person_number"], fatura["remittence"], formato
+                        )
+                    except Exception as e:
+                        conteudo, aviso = None, f"Relatório de coparticipação {formato} ainda não disponível no portal: {e}"
                     if conteudo:
                         nome = f"Coparticipacao_Analitico_{codigo}.{formato.lower()}"
                         anexos.append((nome, ct, conteudo))
