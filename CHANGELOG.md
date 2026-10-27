@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.27-4 (27/10/2026 20:31, com o André) — hapvida-check cd9778e + lifetools f6a94a4 · reverter: hc-2026.10.27-3
+- Motor 0.4.12 / catálogo 1.6.1 — obra 5 (um motor só): "titular vizinho" (dependente sem vínculo logo abaixo do titular de mesmo sobrenome) passa do lote.py para a porta e o reenvio; lote.py, lote_executar.py e lote_relatorio.py removidos. Base de vidas: importação grava sexo M/F (1/3 do layout), 146 registros corrigidos. API lifetools reconstruída junto.
+
 ## hc-2026.10.27-3 (27/10/2026 20:07, dia de faturamento com o André) — hapvida-check 114fbd7 + lifetools 24e8456 · reverter: hc-2026.10.27-2
 - Motor 0.4.11 / catálogo 1.6.0 — bateria do histórico do portal (04–10/2026, 2.482 críticas): pós-vendas recebe menos. Decisões do André: estado civil vazio sem casamento = solteiro; filho com idade de cônjuge = cônjuge. Porta: estado civil, titular com cônjuge = casado, filho↔cônjuge, cônjuge sem data ganha a provisória, 132c do titular. Reenvio: titular <14 e nascimento pela Receita sem humano, mãe vazia pela Receita, cancelada sem mensagem reenvia, "FEITO INCLUSAO SACCAD" não reenvia, 6 textos novos. 115 críticas reais viraram teste. API lifetools reconstruída junto.
 
