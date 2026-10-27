@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.27-2 (27/10/2026, com o André) — hapvida-check 4f152b6 + lifetools 0fb74ce · reverter: hc-2026.10.27-1
+- Motor 0.4.10 (só o número: a regra de município/CPF da YYUQ8 tinha subido na -1 como 0.4.9). Scripts avulsos do OUT26 guardados em `historico/out26/` (não usar).
+
 ## hc-2026.10.27-1 (27/10/2026, dia de faturamento com o André) — hapvida-check e03780b + lifetools 55d0c4a · reverter: hc-pre-processo-202610271503
 - Faturamento: Relatório de Envios no formato aprovado em OUT26 (`montar_relatorio`: tabela azul, enviados e pendentes, linguagem de negócio, sem CSV); zip único acima de 3MB e teto de 10MB (Graph aceitou 8MB; UTC 4,8MB ficou bloqueada à toa na 1ª rodada NOV26); sessão trocada por outra rodada da mesma conta reseleciona o contrato (KGBQY × YYUQ8); lista de ativos pelo "Contrato atual" por contrato (29 contratos em ~1,5 min, antes horas pelo Full da mãe).
 - Linha de base travada: `tests/teste_faturamento_linha_base.py` roda na publicação e bloqueia se quebrar.
