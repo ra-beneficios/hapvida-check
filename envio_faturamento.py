@@ -47,7 +47,9 @@ BASE = ed.SHAREPOINT_FATURAS_BASE
 STATUS_DIR = os.path.join(BASE, "_status")
 RELATORIO_PARA = ["C-level@ra-beneficios.com.br", "financeiro@ra-beneficios.com.br", "relacionamento@ra-beneficios.com.br"]
 MODALIDADE = {"SAUDE": "Saúde", "ODONTO_PREMIUM": "Odonto Premium"}
-LIMITE_ENVIO_BYTES = int(3.3 * 1024 * 1024)  # zip de 3,06MB passou em 30/09; acima disso bloqueia
+# Zip continua acima de 3MB (preparar_anexos). O teto de 3,3MB nunca foi limite do Graph: 27/10/2026 sendMail
+# aceitou 4,9MB e 8MB (UTC NOV26 = 4,8MB zipado ficou bloqueada a toa). 10MB = margem pro servidor do cliente.
+LIMITE_ENVIO_BYTES = 10 * 1024 * 1024
 LISTA_ATIVOS_IDADE_MAX_DIAS = 10
 
 # Padrao NOV26 (Andre, 05/10/2026): so' estes arquivos vao pro cliente - lista
@@ -255,12 +257,38 @@ def graph_send(token, msg):
                       content=json.dumps(msg), timeout=180)
 
 
-def enviar_relatorio(token, comp, enviados_rodada, bloqueados, venc_ref):
+_DOC = {"BOLETO": "Boleto", "NFE": "Nota fiscal", "RELATORIO_ANALITICO": "Relatório analítico", "LISTA_ATIVOS": "Lista de ativos"}
+_PLANO = {"SAUDE": "Saúde", "ODONTO": "Odonto", "COPARTICIPACAO": "Coparticipação"}
+_RE_ARQ = re.compile(r"^(BOLETO|NFE|RELATORIO_ANALITICO|LISTA_ATIVOS)_(SAUDE|ODONTO|COPARTICIPACAO)_\w+?\.(\w+)(?::\s*(.*))?$")
+
+
+def faltas_legiveis(faltas):
+    """'4DFEV: RELATORIO_ANALITICO_SAUDE_4DFEV_NOV26.pdf' -> {'4DFEV': ['Relatório analítico Saúde', ...]}.
+    Documento por tipo+plano (PDF/XLSX/CSV do mesmo relatório viram um item so'); CSV e' fonte interna e
+    nunca aparece sozinho. O que nao for arquivo (vencimento, e-mail, tamanho) vai em 'outros'."""
+    por_cod, outros = {}, []
+    for f in faltas:
+        cod, _, resto = f.partition(": ")
+        m = _RE_ARQ.match(resto.strip()) if resto else None
+        if not m:
+            outros.append(f[:1].upper() + f[1:])
+            continue
+        item = f"{_DOC[m.group(1)]} {_PLANO[m.group(2)]}"
+        if m.group(4):
+            item += " (sem boleto do mês para conferir o total)" if "desconhecido" in m.group(4) else f" ({m.group(4)})"
+        lst = por_cod.setdefault(cod, [])
+        if not any(x.startswith(f"{_DOC[m.group(1)]} {_PLANO[m.group(2)]}") for x in lst):
+            lst.append(item)
+    return por_cod, outros
+
+
+def montar_relatorio(comp, enviados_rodada, bloqueados, venc_ref, ja_enviados=0):
     mes_ano = ed._mes_referencia(venc_ref) if venc_ref else comp
     titulo = f"Relatório de Envios — Faturamento {mes_ano} ({len(enviados_rodada)} clientes)"
     td = 'style="padding:6px 10px;border:1px solid #d0d0d0;font-family:sans-serif;font-size:12px;vertical-align:top"'
     th = ('style="padding:6px 10px;border:1px solid #d0d0d0;background:#1f3b5c;color:#fff;'
           'font-family:sans-serif;font-size:12px;text-align:left"')
+    h3 = 'style="font-size:15px;color:#1f3b5c;margin:22px 0 8px"'
     linhas = ""
     for r in enviados_rodada:
         arqs = "<br>".join(html.escape(a) for a in r["arquivos"])
@@ -272,23 +300,39 @@ def enviar_relatorio(token, comp, enviados_rodada, bloqueados, venc_ref):
         linhas += (f"<tr><td {td}>{html.escape(r['cliente'])}</td><td {td}>{r['codigos'].replace('+', '<br>')}</td>"
                    f"<td {td}>{r['data_envio']}</td><td {td}>{len(r['arquivos'])} arquivos:<br>{arqs}</td>"
                    f"<td {td}>{'<br>'.join(html.escape(e) for e in r['emails'])}</td></tr>")
-    tabela = (f"<table style='border-collapse:collapse;width:100%'><thead><tr><th {th}>Cliente</th><th {th}>Código</th>"
-              f"<th {th}>Data de Envio</th><th {th}>Arquivos Enviados</th><th {th}>E-mails enviados</th></tr></thead>"
-              f"<tbody>{linhas}</tbody></table>") if linhas else "<p>Nenhum envio novo nesta rodada.</p>"
-    pend = "".join(f"<li><b>{html.escape(b['cliente'])}</b> ({b['codigos']}): {html.escape('; '.join(b['faltas']))}</li>"
-                   for b in bloqueados)
-    pend_html = f"<p><b>Não enviados (arquivo faltando ou sem cadastro):</b></p><ul>{pend}</ul>" if pend else \
-        "<p>Nenhum cliente pendente.</p>"
+    enviados_html = (f"<table style='border-collapse:collapse;width:100%'><thead><tr><th {th}>Cliente</th><th {th}>Código</th>"
+                     f"<th {th}>Data de Envio</th><th {th}>Arquivos Enviados</th><th {th}>E-mails enviados</th></tr></thead>"
+                     f"<tbody>{linhas}</tbody></table>") if linhas else \
+        "<p style='font-size:13px'>Nenhum cliente completou a documentação desde a rodada anterior.</p>"
+    pend = ""
+    for b in bloqueados:
+        por_cod, outros = faltas_legiveis(b["faltas"])
+        itens = "".join(f"<b>{html.escape(c)}</b>: {html.escape(', '.join(v))}<br>" for c, v in por_cod.items())
+        itens += "".join(f"{html.escape(o)}<br>" for o in outros)
+        pend += (f"<tr><td {td}>{html.escape(b['cliente'])}</td><td {td}>{b['codigos'].replace('+', '<br>')}</td>"
+                 f"<td {td}>{b.get('prontos', '')}</td><td {td}>{itens}</td></tr>")
+    pend_html = (f"<table style='border-collapse:collapse;width:100%'><thead><tr><th {th}>Cliente</th><th {th}>Código</th>"
+                 f"<th {th}>Arquivos prontos</th><th {th}>Aguardando</th></tr></thead><tbody>{pend}</tbody></table>"
+                 ) if pend else "<p style='font-size:13px'>Nenhum cliente pendente.</p>"
     com_pend = "".join(f"<li><b>{html.escape(r['cliente'])}</b> ({r['codigos']}): {html.escape('; '.join(r['pendencias']))}</li>"
                        for r in enviados_rodada if r.get("pendencias"))
-    if com_pend:
-        pend_html = (f"<p><b>Enviados sem nota fiscal (não emitida pela operadora até o dia 04):</b></p><ul>{com_pend}</ul>"
-                     + pend_html)
+    resumo = (f"<b>{len(enviados_rodada)}</b> enviado(s) nesta rodada · <b>{len(bloqueados)}</b> aguardando documento"
+              + (f" · <b>{ja_enviados}</b> já enviado(s) em rodadas anteriores" if ja_enviados else ""))
     corpo = (f"<div style='font-family:sans-serif;color:#222'><h2 style='font-size:18px'>{titulo}</h2>"
-             f"<p>Rodada de {datetime.now():%d/%m/%Y %H:%M} — competência {comp}. Cada e-mail só é enviado com todos os "
-             f"documentos completos; no envio final (dia 05), nota fiscal ainda não emitida não segura o envio e fica "
-             f"listada como pendência.</p>{tabela}{pend_html}"
-             f"<p style='color:#666;font-size:12px'>Enviado por Cora - Assistente Digital - RA Benefícios</p></div>")
+             f"<p>Envio dos documentos de faturamento Hapvida (competência {mes_ano}"
+             + (f", vencimento {venc_ref:%d/%m/%Y}" if venc_ref else "") + f"), rodada de {datetime.now():%d/%m/%Y %H:%M}. "
+             "Cada e-mail só é enviado com todos os documentos completos (boleto e nota fiscal pareados, relatório "
+             "analítico e lista de ativos); no envio final (dia 05), nota fiscal ainda não emitida não segura o envio "
+             f"e fica listada como pendência.</p><p style='font-size:13px'>{resumo}</p>"
+             f"<h3 {h3}>Enviados</h3>{enviados_html}"
+             + (f"<h3 {h3}>Enviados sem nota fiscal</h3><ul>{com_pend}</ul>" if com_pend else "")
+             + f"<h3 {h3}>Não enviados — aguardando documento da Hapvida ou cadastro</h3>{pend_html}"
+             "<p style='color:#666;font-size:12px;margin-top:16px'>Enviado por Cora - Assistente Digital - RA Benefícios</p></div>")
+    return titulo, corpo
+
+
+def enviar_relatorio(token, comp, enviados_rodada, bloqueados, venc_ref, ja_enviados=0):
+    titulo, corpo = montar_relatorio(comp, enviados_rodada, bloqueados, venc_ref, ja_enviados)
     msg = {"message": {"subject": titulo, "body": {"contentType": "HTML", "content": corpo},
                        "toRecipients": [{"emailAddress": {"address": e}} for e in RELATORIO_PARA]},
            "saveToSentItems": True}
@@ -338,7 +382,7 @@ def main():
         envio, zip_aviso, nz = preparar_anexos(anexos, g["chave"], comp) if anexos else ([], "", None)
         tam = sum(len(c) for _, _, c in envio)
         if tam > LIMITE_ENVIO_BYTES:
-            faltas.append(f"anexo grande demais ({tam/1024/1024:.1f}MB) - precisa de envio por upload session")
+            faltas.append(f"anexos somam {tam/1024/1024:.1f}MB mesmo compactados (acima de 10MB)")
         venc_ref = venc_ref or venc
         linha = f"{g['cliente'][:40]:40} {g['chave']:12} {len(anexos):2} arq {tam/1024/1024:5.2f}MB {len(emails)} e-mail(s)"
         pendencias = []
@@ -348,7 +392,7 @@ def main():
             pendencias, faltas = faltas, []
         if faltas:
             bloqueados.append({"cliente": g["cliente"] + (f" - {g['unidade']}" if g["unidade"] else ""),
-                               "codigos": g["chave"], "faltas": faltas})
+                               "codigos": g["chave"], "faltas": faltas, "prontos": len(anexos)})
             log(f"BLOQUEADO   {linha} | {'; '.join(faltas)}")
             continue
         if not enviar:
@@ -383,7 +427,7 @@ def main():
     escrever_resumo(comp, log_envios, bloqueados)
     if enviar:  # relatorio ao final de todo envio, com ou sem envio novo (Andre, 01/10/2026)
         token = token or ed._get_graph_token(ed._get_graph_credenciais(os.environ["GCP_PROJECT"]))
-        enviar_relatorio(token, comp, enviados_rodada, bloqueados, venc_ref)
+        enviar_relatorio(token, comp, enviados_rodada, bloqueados, venc_ref, len(ja))
     log(f"fim - {len(enviados_rodada)} enviado(s) nesta rodada, {len(bloqueados)} bloqueado(s)")
 
 

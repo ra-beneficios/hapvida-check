@@ -41,6 +41,7 @@ como foi feito aqui - NAO assumir que os mesmos paths funcionam.
 """
 import io
 import os
+import re
 import time
 import zipfile
 
@@ -54,7 +55,24 @@ MAX_TENTATIVAS = 3
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
 
-def _get_com_retry(url, headers, params=None):
+_RE_OUTRO_CONTRATO = re.compile(r"para o contrato (\w+)", re.I)
+
+
+def _sessao_trocada(r, codigo: str) -> bool:
+    """400 porque outra rodada da MESMA conta trocou o contrato da sessao (a sessao e' por usuario no portal).
+    Caso real 26/10/2026: faturamento pedia o analitico do KGBQY e o portal respondeu 'obrigacao nao
+    encontrada para o contrato YYUQ8' (ciclo de inclusao do YYUQ8 rodando com a conta da Cora)."""
+    if r.status_code != 400:
+        return False
+    txt = r.text or ""
+    if "selecione novamente seu contrato" in txt.lower():
+        return True
+    m = _RE_OUTRO_CONTRATO.search(txt)
+    return bool(m) and m.group(1).upper() != codigo.upper()
+
+
+def _get_com_retry(url, headers, params=None, sessao=None):
+    """sessao=(auth, codigo): se outra rodada da mesma conta trocou o contrato, reseleciona e tenta de novo."""
     ultimo_erro = None
     for _ in range(MAX_TENTATIVAS):
         try:
@@ -65,6 +83,9 @@ def _get_com_retry(url, headers, params=None):
             continue
         if r.status_code in (200, 404):
             return r
+        if sessao and _sessao_trocada(r, sessao[1]):
+            print(f"[sessao] contrato {sessao[1]} trocado por outra sessão da mesma conta - selecionando de novo")
+            criar_sessao_empresa(*sessao)
         ultimo_erro = f"{r.status_code}: {r.text[:200]}"
         time.sleep(2)
     raise RuntimeError(f"falhou {MAX_TENTATIVAS}x: {ultimo_erro}")
@@ -73,7 +94,7 @@ def _get_com_retry(url, headers, params=None):
 def checar_nota_fiscal(auth: dict, codigo: str, billing_number: str) -> dict | None:
     """Retorna {invoiceNumber, verificationCode, invoicePath} ou None se nao houver NFe pra essa fatura."""
     criar_sessao_empresa(auth, codigo)
-    r = _get_com_retry(f"{API_BASE}/billings/invoice", _headers_http(auth), {"billing-number": billing_number})
+    r = _get_com_retry(f"{API_BASE}/billings/invoice", _headers_http(auth), {"billing-number": billing_number}, (auth, codigo))
     if r.status_code == 404:
         return None
     content = r.json().get("content") or {}
@@ -86,7 +107,7 @@ def checar_relatorio_analitico(auth: dict, codigo: str, billing_number: str, tip
     """Retorna {link, length, type} ou None se a remessa nao existir pra essa fatura (ex: coparticipacao)."""
     criar_sessao_empresa(auth, codigo)
     url = f"{API_BASE}/billings/report-monthly/billing-number/{billing_number}/report-type/{tipo}"
-    r = _get_com_retry(url, _headers_http(auth))
+    r = _get_com_retry(url, _headers_http(auth), sessao=(auth, codigo))
     if r.status_code == 404:
         return None
     return r.json().get("content")
@@ -133,7 +154,7 @@ def relatorio_coparticipacao(auth: dict, codigo: str, billing_number: str,
     criar_sessao_empresa(auth, codigo)
     h = _headers_http(auth)
     params = {"person-number": person_number, "billing-number": billing_number}
-    r = _get_com_retry(f"{API_V1}/billings/coparticipation/bill-report", h, params)
+    r = _get_com_retry(f"{API_V1}/billings/coparticipation/bill-report", h, params, (auth, codigo))
     itens = (r.json().get("content") or []) if r.status_code == 200 else []
     for item in itens:
         # Nome real (01/10/2026): EMPRESA_FM_X4ZAT_REMESSA_6365922_PDF.ZIP - um zip com o .PDF dentro.
@@ -142,7 +163,7 @@ def relatorio_coparticipacao(auth: dict, codigo: str, billing_number: str,
             r = _get_com_retry(f"{API_V1}/billings/coparticipation", h, {
                 "person-number": person_number, "billing-extract-id": item["billingExtractId"],
                 "file-name": item["fileName"],
-            })
+            }, (auth, codigo))
             link = r.json().get("content") if r.status_code == 200 else None
             if not link:
                 return None, f"Relatório de coparticipação {formato} pronto mas sem link de download ({r.status_code})."
