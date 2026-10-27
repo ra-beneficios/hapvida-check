@@ -5,12 +5,14 @@ Rodar antes de publicar: docker exec hapvida-check python3 /app/tests/teste_fatu
   nunca nome de arquivo nem CSV). NOV26 saiu como lista solta de arquivos porque o layout aprovado morava num
   script avulso (relatorio_out26.py) fora do motor.
 - Anexos: zip único acima de 3MB; teto 10MB (Graph aceitou 8MB em 27/10). UTC NOV26 (4,8MB) ficou bloqueada à toa.
-- Sessão trocada por outra rodada da mesma conta (KGBQY x YYUQ8, 26/10) reseleciona o contrato."""
+- Sessão trocada por outra rodada da mesma conta (KGBQY x YYUQ8, 26/10) reseleciona o contrato.
+- Lista de ativos pelo "Contrato atual" por contrato (sai em segundos), nunca mais o Full da mãe (horas)."""
 import sys
 from datetime import date
 
 sys.path.insert(0, "/app")
 import documentos_saude as ds  # noqa: E402
+import faturamento_mensal as fm  # noqa: E402
 import envio_faturamento as ef  # noqa: E402
 
 falhas = 0
@@ -58,6 +60,20 @@ ok(ds._sessao_trocada(R(400, "A obrigação 3504811375 não foi encontrada para 
 ok(not ds._sessao_trocada(R(400, "não foi encontrada para o contrato KGBQY."), "KGBQY"), "mesmo contrato não reseleciona")
 ok(ds._sessao_trocada(R(400, "Selecione novamente seu contrato"), "KGBQY"), "'selecione novamente' reseleciona")
 ok(not ds._sessao_trocada(R(202, "Aguardando a geração do relatório"), "KGBQY"), "fila da Hapvida não é sessão trocada")
+
+# --- Lista de ativos pelo "Contrato atual" (27/10): Processed com link aparece UMA vez e volta pra "Process"
+fm.time.sleep = lambda s: None
+fm.censo_saude.criar_sessao_empresa = lambda auth, cod: None
+pedidos = []
+fm.censo_saude.gerar_relatorio = lambda auth, cod, tipo: pedidos.append((cod, tipo))
+L = "https://x/Beneficiarios-contrato-{}-u-Current.csv?se={}"
+roteiro = iter([{"status": "Process"},                                       # antes
+                {"status": "Processing"}, {"status": "Process"},             # 1o pedido: janela perdida
+                {"status": "Processed", "downloadLink": L.format("YYUQ8", 1)},  # 2o: link de OUTRO contrato
+                {"status": "Processed", "downloadLink": L.format("KGBQY", 2)}])
+fm._status_relatorio = lambda auth, tipo: next(roteiro)
+ok(fm._lista_contrato_atual({}, "KGBQY") == L.format("KGBQY", 2), "pega o link na janela única, só do contrato certo")
+ok(pedidos == [("KGBQY", "Current")] * 2, "tipo Current e pede de novo quando volta a ocioso")
 
 print(f"\n{falhas} falha(s)")
 sys.exit(1 if falhas else 0)

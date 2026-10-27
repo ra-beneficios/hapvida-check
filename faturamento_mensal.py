@@ -19,7 +19,8 @@ pendencia de cadastro no Bitwarden. Lista viva em _status/LEGADO_ASSUMIDO_CODE.j
 Nada aqui manda e-mail pra cliente - so' salva arquivo (enviar_email=False)
 e gera o relatorio de auditoria em faturas/_status/.
 
-Lista de ativos e analitico de copart PDF sao gerados em fila pela Hapvida:
+Lista de ativos: "Contrato atual" (type=Current) um contrato por vez, sai na hora (27/10/2026).
+Analitico de copart PDF e' gerado em fila pela Hapvida:
 pedidos numa execucao, coletados na seguinte (26 -> ultimo dia -> 04).
 
 Pausar os downloads: criar _status/FATURAMENTO_PAUSADO (so' roda a auditoria).
@@ -342,112 +343,74 @@ def _texto_censo(bruto: bytes) -> str:
     return "\n".join(l for l in texto.splitlines() if l.strip())
 
 
-ESTADO_LISTAS = os.path.join(BASE, "_status", "LISTAS_ATIVOS_ESTADO.json")
-
-
 def salvar_listas_ativos(codigos: dict[str, set[str]], comp: str, modo: str, creds: dict) -> list[str]:
-    """Lista de ativos OFICIAL do portal (relatorio Full de beneficiarios da
-    mae, mesmo arquivo do script 160), quebrada por contrato em
-    LISTA_ATIVOS_SAUDE_{codigo}_{comp}.csv (fonte do XLSX e do PDF). So' grava arquivo; NAO mexe no banco
-    de vidas (isso continua sendo o 160, manual).
+    """Lista de ativos OFICIAL do portal, um contrato por vez pelo relatorio "Contrato atual" (type=Current),
+    o mesmo botao que a tela usa, gravada em LISTA_ATIVOS_SAUDE_{codigo}_{comp}.csv (fonte do XLSX e do PDF).
+    So' grava arquivo; NAO mexe no banco de vidas (isso continua sendo o 160).
 
-    Assincrono desde 01/10/2026: a Hapvida chega a levar mais de 40 min pra
-    gerar (0KFXW estoura qualquer espera razoavel) e o status do relatorio e'
-    por USUARIO, nao por empresa - um pedido atrasado aparece como resultado
-    do pedido seguinte. Entao: (1) se um relatorio pedido numa execucao
-    anterior ficou pronto, coleta; (2) pede o das maes que ainda tem filho
-    sem lista e espera ate' POLL_TIMEOUT_SECONDS; se nao sair, fica registrado
-    em ESTADO_LISTAS e a proxima execucao coleta. O CSV traz o codigo de cada
-    linha (coluna EMPRESA), entao o arquivo se identifica sozinho: so' grava
-    linha de contrato que ainda falta."""
+    27/10/2026 (Andre): ate' aqui pedia o "Completo (mae + coligados)" (type=Full) da mae, assincrono, uma mae
+    por vez - o Full do 0KFXW levava horas e travava a fila de todo mundo (NOV26: 1o envio com quase todo
+    contrato sem lista). O Current de um contrato e' pequeno e sai na hora, como quando o Andre baixa na tela.
+    Se nao sair em POLL_TIMEOUT_SECONDS, fica pra proxima execucao (o arquivo se identifica pela coluna EMPRESA)."""
     alvo = set(codigos) if modo == "completo" else {c for c in codigos if not tem_lista(c, comp)}
     if not alvo:
         return []
-    gravados: set[str] = set()
-
-    def faltam() -> set[str]:
-        # completo regrava todas; faltantes so' as que nao estao na pasta
-        if modo == "completo":
-            return alvo - gravados
-        return {c for c in alvo if not tem_lista(c, comp)}
-
-    mae_de = _maes_dos_codigos(alvo)
-    estado = _ler_estado_listas()
-    erros = []
-    grupos = [("carol", [m for m in cadastro.maes_portal_moderno() if m not in CODIGOS_CONTA_MARCO])]
-    if alvo & set(CODIGOS_CONTA_MARCO):
-        grupos.append(("marco", ["DAVJV"]))
-    for conta, maes in grupos:
-        st = estado.setdefault(conta, {})
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch()
-            page = browser.new_page()
-            try:
-                auth = login_saude(page, creds[conta]["usuario"], creds[conta]["senha"])
-            finally:
-                browser.close()
-        coletadas: set[str] = set()  # mae ja' coletada nesta execucao nao e' pedida de novo
+    erros, gravados = [], set()
+    contas = {"carol": sorted(alvo - set(CODIGOS_CONTA_MARCO)), "marco": sorted(alvo & set(CODIGOS_CONTA_MARCO))}
+    for conta, lista in contas.items():
+        if not lista:
+            continue
         try:
-            ct = _status_relatorio_full(auth, esperar=True)
-            link = ct.get("downloadLink")
-            if ct.get("status") == "Processed" and link and st.get("pedido") and link != st.get("link_consumido"):
-                gravados |= _gravar_listas(_baixar(link), alvo, comp)
-                log(f"lista ativos: coletado relatório pedido antes (mãe {st['pedido']}, {st.get('pedido_em')})")
-                coletadas.add(st["pedido"])
-                st.update(pedido=None, link_consumido=link)
-                _salvar_estado_listas(estado)
-            for mae in maes:
-                pendentes = faltam()
-                if mae in coletadas or not any(mae_de.get(c) in (mae, None) for c in pendentes):
-                    continue
-                if ct.get("status") == "Processing":
-                    erros.append(f"Lista de ativos: relatório da mãe {st.get('pedido')} ainda em geração na Hapvida — coletado na próxima execução")
-                    break
-                censo_saude.criar_sessao_empresa(auth, mae)
-                censo_saude.gerar_relatorio(auth, mae, "Full")
-                st.update(pedido=mae, pedido_em=datetime.now().isoformat(timespec="minutes"))
-                _salvar_estado_listas(estado)
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch()
+                page = browser.new_page()
                 try:
-                    link = censo_saude._poll_status(auth, "Full", link)
-                except censo_saude.RelatorioTimeoutError:
-                    erros.append(f"Lista de ativos (mãe {mae}): pedida, ainda em geração na Hapvida — coletada na próxima execução")
-                    break
-                gravados |= _gravar_listas(_baixar(link), alvo, comp)
-                st.update(pedido=None, link_consumido=link)
-                _salvar_estado_listas(estado)
-                ct = {"status": "Processed", "downloadLink": link}
+                    auth = login_saude(page, creds[conta]["usuario"], creds[conta]["senha"])
+                finally:
+                    browser.close()
         except Exception as e:
-            erros.append(f"Lista de ativos (conta {conta}): {e}")
-            log(f"lista ativos {conta}: ERRO {e}")
-    resto = faltam()
+            erros.append(f"Lista de ativos (conta {conta}): login falhou: {e}")
+            continue
+        for codigo in lista:
+            try:
+                gravados |= _gravar_listas(_baixar(_lista_contrato_atual(auth, codigo)), {codigo}, comp)
+            except censo_saude.RelatorioTimeoutError:
+                erros.append(f"Lista de ativos {codigo}: ainda em geração na Hapvida — coletada na próxima execução")
+            except Exception as e:
+                erros.append(f"Lista de ativos {codigo}: {e}")
+                log(f"lista ativos {codigo}: ERRO {e}")
+    resto = alvo - gravados if modo == "completo" else {c for c in alvo if not tem_lista(c, comp)}
     if resto:
         erros.append(f"Lista de ativos ainda faltando: {', '.join(sorted(resto))}")
     return erros
 
 
-def _maes_dos_codigos(codigos: set[str]) -> dict[str, str | None]:
-    """codigo -> mae (o proprio codigo se for mae; None se nao souber)."""
-    conn = psycopg2.connect(dbname="lifetools")
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT codigo_externo, codigo_contrato_mae FROM empresa_operadora_codigos "
-                        "WHERE operadora_id = 1 AND codigo_externo = ANY(%s)", (list(codigos),))
-            maes = set(cadastro.maes_portal_moderno())
-            return {c: (m or (c if c in maes else None)) for c, m in cur.fetchall()}
-    finally:
-        conn.close()
+def _lista_contrato_atual(auth: dict, codigo: str) -> str:
+    """Link do "Contrato atual" de UM contrato. Comportamento real (27/10/2026): fica pronto em ~5s, mas o status
+    "Processed" com link aparece UMA vez - a consulta seguinte ja' volta pra "Process" (ocioso) sem link. Por isso
+    consulta a cada 2s, so' aceita link novo E do contrato certo (o codigo vem no nome do arquivo; protege de
+    sessao trocada por outra rodada da mesma conta) e, se voltar a ocioso sem a gente ver o link, pede de novo."""
+    antes = _status_relatorio(auth, "Current").get("downloadLink")
+    for _ in range(3):
+        censo_saude.criar_sessao_empresa(auth, codigo)
+        censo_saude.gerar_relatorio(auth, codigo, "Current")
+        fim = time.time() + 120
+        while time.time() < fim:
+            time.sleep(2)
+            ct = _status_relatorio(auth, "Current")
+            link = ct.get("downloadLink")
+            if ct.get("status") == "Processed" and link and link != antes and f"-contrato-{codigo}-" in link:
+                return link
+            if ct.get("status") == "Process":
+                break
+    raise censo_saude.RelatorioTimeoutError(f"lista do contrato {codigo} (Contrato atual) não saiu em 3 pedidos")
 
 
-def _status_relatorio_full(auth: dict, esperar: bool) -> dict:
-    url = f"{censo_saude.API_BASE}/beneficiaries/status-report?type=Full"
-    inicio = time.time()
-    while True:
-        r = httpx.get(url, headers=censo_saude._headers_http(auth), timeout=30)
-        r.raise_for_status()
-        ct = r.json().get("content", {}) or {}
-        if not esperar or ct.get("status") != "Processing" or time.time() - inicio > censo_saude.POLL_TIMEOUT_SECONDS:
-            return ct
-        time.sleep(censo_saude.POLL_INTERVAL_SECONDS)
+def _status_relatorio(auth: dict, tipo: str) -> dict:
+    r = httpx.get(f"{censo_saude.API_BASE}/beneficiaries/status-report?type={tipo}",
+                  headers=censo_saude._headers_http(auth), timeout=30)
+    r.raise_for_status()
+    return r.json().get("content", {}) or {}
 
 
 def _baixar(link: str) -> bytes:
@@ -472,19 +435,6 @@ def _gravar_listas(bruto: bytes, alvo: set[str], comp: str) -> set[str]:
             w.writerows(linhas)
     log(f"lista ativos: {len(por_codigo)} contrato(s) gravados ({', '.join(sorted(por_codigo)) or '-'})")
     return set(por_codigo)
-
-
-def _ler_estado_listas() -> dict:
-    try:
-        with open(ESTADO_LISTAS, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
-
-
-def _salvar_estado_listas(estado: dict) -> None:
-    with open(ESTADO_LISTAS, "w", encoding="utf-8") as f:
-        json.dump(estado, f, ensure_ascii=False, indent=1)
 
 
 # ---------------------------------------------------------------- xlsx
