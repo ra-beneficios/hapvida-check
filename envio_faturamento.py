@@ -19,6 +19,9 @@ em diante e' o mes seguinte).
 
 Pausar tudo: criar o arquivo _status/ENVIO_PAUSADO (qualquer conteudo).
 
+LINHA DE BASE (27/10/2026): formato do Relatorio de Envios (layout OUT26), zip unico e teto de 10MB sao
+travados por tests/teste_faturamento_linha_base.py - rodar antes de publicar; mudar so com o Andre.
+
 Uso: python3 envio_faturamento.py [--enviar] [--final] [--competencia=NOV26] [--codigos=AT2BC]
 Sem --enviar e' so' previa (nada sai).
 """
