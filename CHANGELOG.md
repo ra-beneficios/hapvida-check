@@ -2,6 +2,11 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.27-1 (27/10/2026, dia de faturamento com o André) — hapvida-check e03780b + lifetools 55d0c4a · reverter: hc-pre-processo-202610271503
+- Faturamento: Relatório de Envios no formato aprovado em OUT26 (`montar_relatorio`: tabela azul, enviados e pendentes, linguagem de negócio, sem CSV); zip único acima de 3MB e teto de 10MB (Graph aceitou 8MB; UTC 4,8MB ficou bloqueada à toa na 1ª rodada NOV26); sessão trocada por outra rodada da mesma conta reseleciona o contrato (KGBQY × YYUQ8); lista de ativos pelo "Contrato atual" por contrato (29 contratos em ~1,5 min, antes horas pelo Full da mãe).
+- Linha de base travada: `tests/teste_faturamento_linha_base.py` roda na publicação e bloqueia se quebrar.
+- Motor (lifetools fix/motor-municipio-cpf-1026, aprovado): município pelo CEP e CPF de outra pessoa vira pergunta (YYUQ8 26/10). API lifetools reconstruída junto. SQL 184 (Odonto Puro sem fatura) commitado.
+
 ## hc-2026.10.23-4 (23/10/2026) — hapvida-check (compose consertado) + lifetools 57f1ba8 · reverter: hc-2026.10.23-3
 - Segredos: Bitwarden é o cofre único. A cópia que o container lê é gerada de hora em hora por `infra/secrets/bitwarden_para_cofre.py` (lifetools); saem `sync_bitwarden_legado/portal.py` e o backend GCP do `secrets_store` (biblioteca do Google fora da imagem). Tentativa anterior se reverteu sozinha (YAML do compose quebrado por um sed meu).
 
