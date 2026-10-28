@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.28-1 (28/10/2026 07:34, com o André) — hapvida-check df133b6 + lifetools 9a0e7fb · reverter: hc-2026.10.27-4
+- Portal de Movimentações no ar (piloto Carol/HC2 4DFEV, só inclusão), envio ao portal DESLIGADO (MOV_ENVIO_PORTAL). Rotas /odonto-premium/incluir e /pre-cancelar; crítica de movimentação de chamado volta pra tela (sem arquivo no Teams); inclusão de chamado sem cartão. Banco: migrações movimentacoes 001–003 em prod (backup 20261028_0715). API lifetools reconstruída; tela em intranet /movimentacoes/; cron */5 movimentacoes.rodar.
+
 ## hc-2026.10.27-4 (27/10/2026 20:31, com o André) — hapvida-check cd9778e + lifetools f6a94a4 · reverter: hc-2026.10.27-3
 - Motor 0.4.12 / catálogo 1.6.1 — obra 5 (um motor só): "titular vizinho" (dependente sem vínculo logo abaixo do titular de mesmo sobrenome) passa do lote.py para a porta e o reenvio; lote.py, lote_executar.py e lote_relatorio.py removidos. Base de vidas: importação grava sexo M/F (1/3 do layout), 146 registros corrigidos. API lifetools reconstruída junto.
 
