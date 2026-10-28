@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.28-2 (28/10/2026 13:53, com o André) — hapvida-check 720c6eb + lifetools f02ebac · reverter: hc-2026.10.28-1
+- Acertos do 1º teste guiado do Portal de Movimentações (UTC DAVJV/SY8MI, MOV-2026-000002). Motor 0.4.13: CEP geral recusado usa a agência dos Correios do bairro (ViaCEP passou a devolver agências na busca por cidade). Odonto Premium: controle do Legado guardado também quando o titular fica "pendente de documento". Lifetools: 132a preenchido com o contrato do chamado, planilha corrigida no mesmo chamado, cancelar chamado (migração 004 em prod, backup 20261028_1352), um pedido só por endereço da família/CEP, etapas da análise, protocolo por operadora e documento pedido na tela. Envio ao portal LIGADO (piloto 4DFEV, DAVJV).
+
 ## hc-2026.10.28-1 (28/10/2026 07:34, com o André) — hapvida-check df133b6 + lifetools 9a0e7fb · reverter: hc-2026.10.27-4
 - Portal de Movimentações no ar (piloto Carol/HC2 4DFEV, só inclusão), envio ao portal DESLIGADO (MOV_ENVIO_PORTAL). Rotas /odonto-premium/incluir e /pre-cancelar; crítica de movimentação de chamado volta pra tela (sem arquivo no Teams); inclusão de chamado sem cartão. Banco: migrações movimentacoes 001–003 em prod (backup 20261028_0715). API lifetools reconstruída; tela em intranet /movimentacoes/; cron */5 movimentacoes.rodar.
 
