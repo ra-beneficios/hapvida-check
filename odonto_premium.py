@@ -164,8 +164,10 @@ def incluir(cod: str, familias: list[dict]) -> dict:
                 if f["cpf"] in res and not res[f["cpf"]]["titular"].startswith("FALHA"):
                     continue        # já foi: não cadastra de novo
                 r = {"titular": _titular(page, menu, f, html), "deps": {}}
-                if r["titular"] == "OK":
+                if r["titular"] == "OK" or r["titular"].startswith("PENDENTE_DOC"):
+                    # 28/10/2026 (UTC SY8MI): o "em validação" também já tem controle (é por ele que o documento entra)
                     r["controle"] = page.evaluate("document.querySelector('input[name=pControle]')?.value")
+                if r["titular"] == "OK":
                     for d in f["deps"]:
                         r["deps"][d["cpf"]] = _dependente(page, d, html, alertas)
                         if "inclusaodependente" not in page.url.lower():
