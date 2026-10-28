@@ -479,6 +479,39 @@ def odonto_premium_pre_cancelar(p: PremiumPreCancelar):
     return {"resultado": odonto_premium.pre_cancelar(_codigo_legado(p.codigo), p.acoes)}
 
 
+class EmailCora(BaseModel):
+    para: list[str]
+    assunto: str
+    html: str
+
+
+# Portal de Movimentações (28/10/2026, decisão 5 do André): interno/operadora sai da cora@. Só aqui há Mail.Send
+# (graph-noreply-app-only); a API da intranet não tem. Só para a Hapvida e a própria RA.
+EMAIL_CORA = "cora@ra-beneficios.com.br"
+EMAIL_CORA_DOMINIOS = ("@hapvida.com.br", "@ra-beneficios.com.br")
+
+
+@app.post("/email/cora")
+def email_cora(p: EmailCora):
+    import json as _json
+    import httpx as _httpx
+    para = [e.strip().lower() for e in p.para if e and e.strip()]
+    if not para or len(para) > 10 or not all(e.endswith(EMAIL_CORA_DOMINIOS) for e in para):
+        raise HTTPException(status_code=400, detail="destinatário fora da Hapvida/RA")
+    if not p.assunto.strip() or len(p.assunto) > 250:
+        raise HTTPException(status_code=400, detail="assunto vazio ou grande demais")
+    token = enviar_documentos._get_graph_token(enviar_documentos._get_graph_credenciais(os.environ.get("GCP_PROJECT", "")))
+    msg = {"message": {"subject": p.assunto, "body": {"contentType": "HTML", "content": p.html},
+                       "toRecipients": [{"emailAddress": {"address": e}} for e in para]},
+           "saveToSentItems": True}
+    r = _httpx.post(f"https://graph.microsoft.com/v1.0/users/{EMAIL_CORA}/sendMail",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    content=_json.dumps(msg), timeout=60)
+    if r.status_code >= 300:
+        raise HTTPException(status_code=502, detail=f"Graph {r.status_code}: {r.text[:300]}")
+    return {"ok": True, "de": EMAIL_CORA, "para": para}
+
+
 class ConsultarCpfs(BaseModel):
     contrato: str
     cpfs: list[str]
