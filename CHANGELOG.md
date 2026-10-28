@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.28-3 (28/10/2026 17:16, com o André) — hapvida-check 6384ab5 + lifetools cf6343a · reverter: hc-2026.10.28-2
+- Motor 0.4.14: município com código de estado (UF+0000, ex. 310000 MINAS GERAIS) vai pelo CEP (Legado recusou a família no Odonto Premium, HC2 4DFEV MOV-2026-000003). Portal de movimentações: análise e envio da Saúde um de cada vez no portal (MOV-000003 caiu com a sessão trocada pela análise do 000004); todos os contratos Saúde ativos do moderno liberados (MOV_CONTRATOS_PILOTO=*); contrato identificado pelo arquivo (132a); documento pedido deixa o chamado "Aguardando você" com o CPF; vida que subiu e voltou aparece como pendenciada (prova). API lifetools reconstruída junto.
+
 ## hc-2026.10.28-2 (28/10/2026 13:53, com o André) — hapvida-check 720c6eb + lifetools f02ebac · reverter: hc-2026.10.28-1
 - Acertos do 1º teste guiado do Portal de Movimentações (UTC DAVJV/SY8MI, MOV-2026-000002). Motor 0.4.13: CEP geral recusado usa a agência dos Correios do bairro (ViaCEP passou a devolver agências na busca por cidade). Odonto Premium: controle do Legado guardado também quando o titular fica "pendente de documento". Lifetools: 132a preenchido com o contrato do chamado, planilha corrigida no mesmo chamado, cancelar chamado (migração 004 em prod, backup 20261028_1352), um pedido só por endereço da família/CEP, etapas da análise, protocolo por operadora e documento pedido na tela. Envio ao portal LIGADO (piloto 4DFEV, DAVJV).
 
