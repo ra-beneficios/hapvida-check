@@ -21,6 +21,7 @@ COPY *.py ./
 # arquivo mudava o vigia na rodada seguinte, sem teste nem publicação.
 COPY --from=lifetools service/saneamento /lifetools_service/saneamento
 COPY --from=lifetools service/pipeline /lifetools_service/pipeline
+COPY --from=lifetools service/movimentacoes /lifetools_service/movimentacoes
 COPY --from=lifetools motor_exclusao /motor/motor_exclusao
 COPY tests ./tests
 

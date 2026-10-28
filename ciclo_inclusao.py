@@ -427,6 +427,10 @@ def processar(cur, inc: dict, agora: datetime, simular: bool) -> None:
                             (json.dumps(inc["ativas"]), inc["id"]))
     pendentes = {v["cpf"] for v in inc["vidas"] if v.get("cpf")} - set(inc["ativas"])
     faltam = len(pendentes)
+    if inc.get("mov_chamado_id"):
+        # 28/10/2026 Portal de Movimentações: o chamado acompanha e fecha (movimentacoes/retorno.py lê as ativas);
+        # nada de pergunta, lembrete ou card no Teams
+        return
     if faltam == 0:
         return finalizar(cur, inc, "TODAS_ATIVAS", simular)
     if not no_expediente(agora) or em_andamento(cur, inc):

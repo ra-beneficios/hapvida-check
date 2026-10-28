@@ -235,6 +235,8 @@ def _notificar(r: dict, contexto: dict) -> None:
                                  f"crítica(s) de exclusão sem mapeamento ({r['contrato']}/{r['controle']})."})
         return
     resp = r["responsavel"]
+    if contexto.get("origem") == "VIGIA_INCLUSAO" and _volta_pro_chamado(r, contexto):
+        return
     if contexto.get("origem") == "VIGIA_INCLUSAO":
         # passos 12 e 14: silêncio pro pós-vendas; só o arquivo do lote com o que o motor não resolveu
         if r["arquivo_responsavel"]:
@@ -269,6 +271,22 @@ def _notificar(r: dict, contexto: dict) -> None:
             "responsavel": resp["nome"], "origem": contexto.get("origem"),
             "relatorio_base64": _arquivo_b64(r["relatorio"]),
             "relatorio_nome": f"Motor_{r['contrato']}_{r['controle']}_decisoes.xlsx"})
+
+
+def _volta_pro_chamado(r: dict, contexto: dict) -> bool:
+    """28/10/2026 Portal de Movimentações: movimentação aberta por um chamado volta pra tela do chamado (as vidas que o
+    motor não resolveu viram "corrigir" lá), não pro Teams. False = não é de chamado, segue o aviso de sempre."""
+    try:
+        from movimentacoes import retorno
+        if not retorno.da_operadora(contexto.get("acompanhamento_id"), r):
+            return False
+    except Exception as e:      # sem o módulo ou sem banco: melhor o aviso de sempre do que silêncio
+        print(f"[ciclo] não consegui devolver pro chamado ({type(e).__name__}: {e}); sigo com o aviso de sempre")
+        return False
+    if r["contadores"].get("nao_mapeadas"):
+        _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"🧩 Lacuna no catálogo do motor: {r['contadores']['nao_mapeadas']} "
+                             f"crítica(s) sem mapeamento ({r['contrato']}/{r['controle']}, execução {r['execucao_id']})."})
+    return True
 
 
 # ── aprovar / descartar ──────────────────────────────────────────────────────────────────────────

@@ -441,6 +441,44 @@ def ciclo_descartar(p: CicloDescartar):
 
 
 # ── Porta de entrada da inclusão (13/10/2026): quem do arquivo já está ativo na Hapvida (consulta ao vivo) ──
+class PremiumIncluir(BaseModel):
+    codigo: str
+    familias: list[dict]
+
+
+class PremiumPreCancelar(BaseModel):
+    codigo: str
+    acoes: list[list]
+
+
+def _codigo_legado(codigo: str) -> str:
+    import re as _re
+    cod = codigo.strip().upper()
+    if not _re.fullmatch(r"[0-9A-Z]{5}", cod):
+        raise HTTPException(status_code=400, detail="código de contrato inválido")
+    return cod
+
+
+@app.post("/odonto-premium/incluir")
+def odonto_premium_incluir(p: PremiumIncluir):
+    """Portal de Movimentações (28/10/2026): famílias no formulário do Odonto Premium do Legado, junto com a Saúde.
+    -> {"resultado": {cpf_titular: {titular, deps: {cpf: msg}}}}. Envia de verdade: só o portal chama, pela fila."""
+    import odonto_premium
+    if not p.familias or len(p.familias) > 300:
+        raise HTTPException(status_code=400, detail="lista de famílias vazia ou grande demais")
+    return {"resultado": odonto_premium.incluir(_codigo_legado(p.codigo), p.familias)}
+
+
+@app.post("/odonto-premium/pre-cancelar")
+def odonto_premium_pre_cancelar(p: PremiumPreCancelar):
+    """Portal de Movimentações (28/10/2026): Saúde que não entrou -> pré-cancela o Odonto Premium já cadastrado.
+    -> {"resultado": {cpf: "OK ..." | "SEM_CODIGO" | "FALHA: ..."}}"""
+    import odonto_premium
+    if not p.acoes or len(p.acoes) > 300:
+        raise HTTPException(status_code=400, detail="lista de ações vazia ou grande demais")
+    return {"resultado": odonto_premium.pre_cancelar(_codigo_legado(p.codigo), p.acoes)}
+
+
 class ConsultarCpfs(BaseModel):
     contrato: str
     cpfs: list[str]

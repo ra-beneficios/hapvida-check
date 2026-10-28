@@ -65,5 +65,18 @@ import retencao  # noqa: E402
 _r = retencao.destino({"upn": "pos.vendas@exemplo", "texto": "x"})
 ok(not retencao.RETIDO or (_r["upn"] == retencao.ADMIN and "era para pos.vendas@exemplo" in _r["texto"]),
    f"retenção do pós-vendas ({'ligada' if retencao.RETIDO else 'desligada'})")
+# 28/10/2026: Portal de Movimentações — Premium no Legado pela fila e a volta da Hapvida pro chamado (não pro Teams)
+for r in ["/odonto-premium/incluir", "/odonto-premium/pre-cancelar"]:
+    ok(r in rotas, f"rota {r}")
+import odonto_premium  # noqa: E402,F401
+
+try:
+    from movimentacoes import retorno  # noqa: E402
+    ok(callable(retorno.da_operadora), "portal de movimentações (retorno) dentro da imagem")
+except Exception as e:
+    ok(False, f"portal de movimentações (retorno) dentro da imagem: {type(e).__name__}: {e}")
+with __import__("unittest.mock").mock.patch("movimentacoes.retorno.da_operadora", return_value=False):
+    ok(not ciclo_criticas._volta_pro_chamado({"contadores": {}}, {"acompanhamento_id": 1}),
+       "movimentação sem chamado segue o aviso de sempre")
 print("motor", VERSAO_MOTOR)
 sys.exit(1 if falhas else 0)
