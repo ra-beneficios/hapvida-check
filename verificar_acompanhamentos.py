@@ -97,6 +97,20 @@ def _rodar_ciclo(cur, linha: dict, control_code) -> bool:
         return False
 
 
+def _no_chamado(acao: str, *args):
+    """29/10/2026 Portal de Movimentações: exclusão aberta por chamado volta pro histórico do chamado (não pro Teams).
+    Melhor esforço: sem o módulo ou sem banco, devolve False e quem chama segue o caminho de sempre."""
+    try:
+        caminho = os.environ.get("SANEAMENTO_PATH", "/lifetools_service")
+        if caminho not in sys.path:
+            sys.path.insert(0, caminho)
+        from movimentacoes import exclusao
+        return getattr(exclusao, acao)(*args)
+    except Exception as e:
+        print(f"[exclusao-chamado] {acao}: {type(e).__name__}: {e}")
+        return False
+
+
 def _datas_exclusao(linha: dict) -> str:
     """Bloco "você pediu x a Hapvida registrou" (13/10). Best-effort: nunca derruba nem atrasa o aviso."""
     nome = linha.get("nome_arquivo") or ""
@@ -165,6 +179,10 @@ def _enviar_onda2(cur, exclusao_api, lote_id: str, estado: dict, dep: dict) -> b
     """Envia a onda dos dependentes sozinho. -> True se subiu (entra no acompanhamento e avisa quem pediu).
     A tentativa fica gravada no lote: falhou uma vez, nao tenta de novo sozinho (vai pro lembrete com botao)."""
     upn = estado["solicitante_upn"]
+    tit = next((e for e in estado["envios"] if e["onda"] == "titulares" and e["contrato"] == dep["contrato"]), {})
+    cur.execute("""SELECT id, mov_chamado_id FROM movimentacoes_hapvida_acompanhamento WHERE nome_arquivo = %s
+                   ORDER BY id DESC LIMIT 1""", (tit.get("arquivo"),))
+    acomp_tit = cur.fetchone() or {}
     try:
         r = exclusao_api.enviar(lote_id, "dependentes", dep["hash"], upn)
         # mesmo criterio do enviar() para gravar o envio: 200 ou protocolo achado na lista do portal
@@ -185,9 +203,12 @@ def _enviar_onda2(cur, exclusao_api, lote_id: str, estado: dict, dep: dict) -> b
     try:  # ja subiu: daqui pra baixo nada pode derrubar o vigia nem levar a reenviar
         cur.execute("""INSERT INTO movimentacoes_hapvida_acompanhamento
                          (codigo_contrato, confirmacao_upload, nome_arquivo, total_vidas, solicitante_upn, solicitante_nome,
-                          proxima_checagem_em)
-                       VALUES (%s, %s, %s, %s, %s, %s, now() + interval '45 minutes')""",
-                    (r["contrato"], r.get("protocolo"), r["arquivo"], r["linhas"], upn, "Motor de Exclusão (onda 2 automática)"))
+                          proxima_checagem_em, mov_chamado_id)
+                       VALUES (%s, %s, %s, %s, %s, %s, now() + interval '45 minutes', %s)""",
+                    (r["contrato"], r.get("protocolo"), r["arquivo"], r["linhas"], upn, "Motor de Exclusão (onda 2 automática)",
+                     acomp_tit.get("mov_chamado_id")))
+        if acomp_tit.get("mov_chamado_id"):
+            _no_chamado("onda_enviada", acomp_tit["id"], r)
     except Exception as e:
         print(f"[onda2-auto] {lote_id}: enviada, mas nao registrei o acompanhamento: {e}")
         notificar(ADMIN_UPN, f"⚠️ Exclusão {dep['contrato']} (lote `{lote_id}`): onda 2 enviada (protocolo "
@@ -231,6 +252,9 @@ def lembrar_ondas_pendentes(cur, agora: datetime.datetime | None = None, simular
                 continue  # titulares ainda processando (ou aviso final ainda nao entregue)
             if agora - acomp["notificado_em"] > datetime.timedelta(days=LEMBRETE_JANELA_DIAS):
                 continue
+            cur.execute("SELECT mov_chamado_id FROM movimentacoes_hapvida_acompanhamento WHERE nome_arquivo = %s "
+                        "ORDER BY id DESC LIMIT 1", (tit["arquivo"],))
+            do_chamado = (cur.fetchone() or {}).get("mov_chamado_id")
             tentou = any(t.get("hash") == dep["hash"] for t in estado.get("auto_onda2", []))
             if ONDA2_AUTOMATICA and not tentou:
                 if simular:
@@ -240,6 +264,8 @@ def lembrar_ondas_pendentes(cur, agora: datetime.datetime | None = None, simular
                     feitos.append(f"{lote_id} {dep['contrato']} onda 2 enviada sozinha")
                     continue
                 estado = servico.ler_estado(lote_id, pastas)  # recarrega (tentativa gravada) antes do lembrete
+            if do_chamado:
+                continue            # chamado do portal: sem cartão no Teams; a falha da onda 2 já foi para a TI
             lembretes = [l for l in estado.get("lembretes", []) if l.get("hash") == dep["hash"]]
             if lembretes and agora - datetime.datetime.fromisoformat(lembretes[-1]["em"]) < datetime.timedelta(hours=LEMBRETE_INTERVALO_H):
                 continue
@@ -357,6 +383,8 @@ def _registrar_recusas_exclusao(linha: dict, codigo_contrato: str, control_code,
                 "vidasCriticadas") or []
         import exclusao_api
         res = exclusao_api.registrar_recusas(nome_arquivo, vidas)
+        if linha.get("mov_chamado_id"):
+            _no_chamado("processada", linha["id"], nome_arquivo, (res or {}).get("recusados") or [])
         if res and res["recusados"]:
             return (f"\n\n🔁 {len(res['recusados'])} vida(s) recusada(s) ficaram registradas no lote `{res['lote']}` e "
                     f"voltam a poder ser tratadas: " + ", ".join(r["codigo"] for r in res["recusados"]) + ".")
@@ -416,6 +444,11 @@ def processar_linha(cur, linha: dict) -> None:
     meio_do_lote = tipo == "exclusão" and _onda2_pendente(nome_arquivo)
 
     def avisar(texto: str, falha: bool = False) -> bool:
+        if tipo == "exclusão" and linha.get("mov_chamado_id"):
+            if falha:
+                _no_chamado("falhou", linha["id"], nome_arquivo, texto)
+                return notificar(ADMIN_UPN, texto + f"\n\n(exclusão de chamado do portal de movimentações, acompanhamento {linha['id']})")
+            return bool(_no_chamado("avisar", linha["id"], texto)) or notificar(ADMIN_UPN, texto)
         if not silencio:
             return notificar(solicitante_upn, texto)
         return notificar(ADMIN_UPN, texto) if falha else True
