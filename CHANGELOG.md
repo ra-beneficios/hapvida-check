@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.29-9 (29/10/2026 19:41, com o André) — hapvida-check c8b5ff3 + lifetools dcc96f6 · reverter: hc-2026.10.29-8
+- Portal de Movimentações, Tela 4: CARTEIRA do pós-vendas (contratos Saúde + Premium par, chamados abertos e aguardando, por dono; gestor e Diretoria veem todas) e DELEGAÇÃO DE FÉRIAS pela tela (só a própria carteira, salvo gestor/Diretoria; só para colega da equipe; sem retroativo; até 90 dias; sem sobreposição nem cadeia; encerrar/cancelar grava quem e quando). Quem cobre vê o aviso "cobrindo a carteira de X até dd/mm" e recebe o sininho dela. Migração 005 (revogada_por). API lifetools reconstruída junto.
+
 ## hc-2026.10.29-8 (29/10/2026 14:27, com o André) — hapvida-check 6db3630 + lifetools 7e9a733 · reverter: hc-2026.10.29-7
 - Portal de Movimentações: crítica "dados cadastrais divergem" sem fonte (consulta do CPF em branco / cadastro antigo da Hapvida) vira cartão de conferir com o documento — CPF, nome, mãe e nascimento abertos; corrigiu, reenvia; "os dados conferem" tira do bloqueio e avisa a TI. Antes pedia ao pós-vendas "abrir chamado na Hapvida para liberar o cadastro" de quem nem entrou (MOV-2026-000002 linha 40). Cartões já abertos convertidos. API lifetools reconstruída junto.
 
