@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.29-6 (29/10/2026 13:56, com o André) — hapvida-check 4049b01 + lifetools ac6c853 · reverter: hc-2026.10.29-5
+- Portal de Movimentações: etiqueta do tipo do chamado (Inclusão azul / Exclusão âmbar) na lista de abertos e concluídos e no título do chamado. Só tela; API lifetools reconstruída junto.
+
 ## hc-2026.10.29-5 (29/10/2026 13:41, com o André) — hapvida-check 5404349 + lifetools 17a4165 · reverter: hc-2026.10.29-4
 - Portal de Movimentações: EXCLUSÃO habilitada. Chamado com a planilha modelo da Hapvida (contrato pela 709A/708) roda o Motor de Exclusão; sem aprovação — só pede decisão para dependente de lá (titular saindo, ele fora da planilha), art. 30/31 e volume >80%; ação manual com "já excluí no portal"/"não vai sair". Titulares primeiro, onda 2 sozinha pelo vigia (herda o chamado, sem cartão no Teams); Premium pré-cancelado no Legado (titular = contrato da família). Vigia: avisos, processada/recusas e falha de exclusão de chamado vão pro histórico do chamado. Junto: exclusão da transferência passa a ter acompanhamento (a do FHMWR 1336553 de 28/10 registrada à mão, acompanhamento 130); chamado fecha depois da última tarefa da fila; falha latente na transferência sem "por". API lifetools reconstruída junto.
 
