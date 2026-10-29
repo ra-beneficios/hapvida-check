@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.29-7 (29/10/2026 14:04, com o André) — hapvida-check 51c4899 + lifetools 4d8a362 · reverter: hc-2026.10.29-6
+- Sininho: rota /auth/notificacoes (chamados "Aguardando você" de quem pediu, do responsável do contrato ou de quem recebeu a delegação; some ao resolver) no sino da intranet e no do portal de movimentações. Portal: botão Atualizar, atualização a cada 30 s com a aba visível (não recarrega formulário aberto), contagem no título da aba, link direto ao chamado (#id). API lifetools reconstruída junto.
+
 ## hc-2026.10.29-6 (29/10/2026 13:56, com o André) — hapvida-check 4049b01 + lifetools ac6c853 · reverter: hc-2026.10.29-5
 - Portal de Movimentações: etiqueta do tipo do chamado (Inclusão azul / Exclusão âmbar) na lista de abertos e concluídos e no título do chamado. Só tela; API lifetools reconstruída junto.
 
