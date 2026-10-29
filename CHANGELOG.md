@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.29-8 (29/10/2026 14:27, com o André) — hapvida-check 6db3630 + lifetools 7e9a733 · reverter: hc-2026.10.29-7
+- Portal de Movimentações: crítica "dados cadastrais divergem" sem fonte (consulta do CPF em branco / cadastro antigo da Hapvida) vira cartão de conferir com o documento — CPF, nome, mãe e nascimento abertos; corrigiu, reenvia; "os dados conferem" tira do bloqueio e avisa a TI. Antes pedia ao pós-vendas "abrir chamado na Hapvida para liberar o cadastro" de quem nem entrou (MOV-2026-000002 linha 40). Cartões já abertos convertidos. API lifetools reconstruída junto.
+
 ## hc-2026.10.29-7 (29/10/2026 14:04, com o André) — hapvida-check 51c4899 + lifetools 4d8a362 · reverter: hc-2026.10.29-6
 - Sininho: rota /auth/notificacoes (chamados "Aguardando você" de quem pediu, do responsável do contrato ou de quem recebeu a delegação; some ao resolver) no sino da intranet e no do portal de movimentações. Portal: botão Atualizar, atualização a cada 30 s com a aba visível (não recarrega formulário aberto), contagem no título da aba, link direto ao chamado (#id). API lifetools reconstruída junto.
 
