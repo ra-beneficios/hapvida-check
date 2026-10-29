@@ -2,8 +2,14 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.29-4 (29/10/2026 12:31, com o André) — hapvida-check 3c14856 + lifetools 961d607 · reverter: hc-2026.10.29-3
+- Portal de movimentações: arquivo da Saúde manda titulares antes dos dependentes (a Hapvida processa o dependente pelo titular; titular incluído depois na planilha ficava abaixo dele). 1º uso: MOV-2026-000004 PEG8N, MAGNOLIA (linha 8) reenviada com o titular ALMIR (linha 17, dados da inclusão de 30/09, adesão 30/09/2026), protocolo 1336740. API lifetools reconstruída junto.
+
 ## hc-2026.10.29-3 (29/10/2026 12:18, com o André) — hapvida-check 3cfbdb8 + lifetools 4a868f8 · reverter: hc-2026.10.29-2
 - Motor 0.4.15: município se autorresolve — ignora apóstrofo/hífen/acento ("Dias d'Ávila" = DIAS D AVILA, travou a linha 8 do MOV-2026-000004 PEG8N), expande abreviação (S., STA, N., GOV...), aceita nome claramente parecido, nome repetido em outro estado fica com a UF do CEP, e sai pelo CEP quando o nome não bate; busca de CEP no ViaCEP acha cidade com D'. API lifetools reconstruída junto.
+
+## hc-2026.10.29-2 (29/10/2026 10:50, com o André) — hapvida-check 3cfbdb8 + lifetools aefdda4 · reverter: hc-2026.10.29-1
+- Portal de movimentações: vida que subiu pendenciada e ficou ativa na Saúde vai para o Odonto Premium (o acompanhamento enfileira; antes ficava parada em "espera o titular subir limpo"). MOV-2026-000003 linha 4 (Rosangela) cadastrada no 2M2DX; chamado CONCLUÍDO. API lifetools reconstruída junto.
 
 ## hc-2026.10.29-1 (29/10/2026 10:40, com o André) — hapvida-check 7e2e573 + lifetools 9c47b38 · reverter: hc-2026.10.28-3
 - Transferência no grupo pelo Portal de Movimentações (MOV-2026-000003): botão "É transferência" exclui a Saúde na origem pelo motor de exclusão (Odonto Puro sai junto), pré-cancela o Odonto Premium da origem e manda da cora@ o pedido de exclusão imediata à Hapvida (rota nova /email/cora, só domínios hapvida/ra); dependente da origem fora da planilha pede confirmação; vigia reanalisa a cada 2h até a origem cancelar. API lifetools reconstruída junto.
