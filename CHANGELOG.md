@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.30-6 (30/10/2026 16:45, com o André) — hapvida-check ef07f95 + lifetools fec3b9d · reverter: hc-2026.10.30-5
+- Motor: "titular tinha X anos quando o filho nasceu" mostra as datas que estão na planilha; titular nascido depois do filho manda corrigir no cartão do titular (MOV-000006 l.46: o André leu "-2 anos" com o titular de 1982 na cabeça, mas a planilha tinha 2009). API lifetools reconstruída junto.
+
 ## hc-2026.10.30-5 (30/10/2026 16:20, com o André) — hapvida-check 6d0fcc5 + lifetools efcdc22 · reverter: hc-2026.10.30-4
 - Portal de Movimentações (REGRA do André): e-mail de exclusão imediata à Hapvida leva NOME COMPLETO, CARTEIRINHA (código do beneficiário na origem) e CPF de cada vida; faltou um, não manda e avisa a TI. Os 3 e-mails já enviados (MOV-000006 4DFEV e 2XP6W, MOV-000003 FHMWR) foram reenviados com "[Reenvio]" e registrados no histórico. API lifetools reconstruída junto.
 
