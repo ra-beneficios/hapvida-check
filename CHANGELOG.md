@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.30-5 (30/10/2026 16:20, com o André) — hapvida-check 6d0fcc5 + lifetools efcdc22 · reverter: hc-2026.10.30-4
+- Portal de Movimentações (REGRA do André): e-mail de exclusão imediata à Hapvida leva NOME COMPLETO, CARTEIRINHA (código do beneficiário na origem) e CPF de cada vida; faltou um, não manda e avisa a TI. Os 3 e-mails já enviados (MOV-000006 4DFEV e 2XP6W, MOV-000003 FHMWR) foram reenviados com "[Reenvio]" e registrados no histórico. API lifetools reconstruída junto.
+
 ## hc-2026.10.30-4 (30/10/2026 16:06, com o André) — hapvida-check 7e30fb6 + lifetools 95b5f39 · reverter: hc-2026.10.30-3
 - Motor: (1) mais de um "filho" com idade impossível, ou titular com menos de 18 anos, não vira cônjuge — a data errada é a do titular (MOV-000006 l.44-46: KAUANY tinha virado esposa do titular MARCELO "2009"); (2) CEP de rua só com número ("RUA 33", Itaboraí): pesquisa "Rua 33" no ViaCEP, compara o número por extenso ("TRINTA E TRES") e o bairro desempata — antes nem pesquisava e ia ao pós-vendas (André achou no Google o 24866-696). API lifetools reconstruída junto.
 
