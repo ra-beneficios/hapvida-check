@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.29-10 (29/10/2026 22:27, com o André) — hapvida-check dcf2c77 + lifetools 51f6ee2 · reverter: hc-2026.10.29-9
+- Portal de Movimentações, pontas soltas: Odonto Premium "em validação de documentos" no Legado é reconferido pela base de vidas (seg/qua/sex 02h), sem entrar no portal — CPF ativo no contrato Premium vira ATIVA, o pedido de documento sai da tela e do sininho (fica registrado que foi pedido). TI (só RA-TI) vê o erro do envio que FALHOU no chamado e repete pela tela ("Nada subiu: enviar de novo"), escrevendo o que conferiu no portal; vai pro histórico. Anexar o documento do Premium no Legado: ainda não (aguarda caso real + OK do André). API lifetools reconstruída junto.
+
 ## hc-2026.10.29-9 (29/10/2026 19:41, com o André) — hapvida-check c8b5ff3 + lifetools dcc96f6 · reverter: hc-2026.10.29-8
 - Portal de Movimentações, Tela 4: CARTEIRA do pós-vendas (contratos Saúde + Premium par, chamados abertos e aguardando, por dono; gestor e Diretoria veem todas) e DELEGAÇÃO DE FÉRIAS pela tela (só a própria carteira, salvo gestor/Diretoria; só para colega da equipe; sem retroativo; até 90 dias; sem sobreposição nem cadeia; encerrar/cancelar grava quem e quando). Quem cobre vê o aviso "cobrindo a carteira de X até dd/mm" e recebe o sininho dela. Migração 005 (revogada_por). API lifetools reconstruída junto.
 
