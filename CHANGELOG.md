@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.30-2 (30/10/2026 15:38, com o André) — hapvida-check 540438c + lifetools 001434b · reverter: hc-2026.10.30-1
+- Motor + Portal de Movimentações (MOV-2026-000006 8DAC9): (1) nome da mãe abreviado na Receita ("SEBASTIANA ROCHA F D OLIVEIRA", "EUNICE DE MELO DE O PAULO") não substitui mais o completo da planilha — a pergunta "sem abreviação" voltava mesmo com o pós-vendas confirmando; linhas 18/22 sobem de novo; (2) filha com o CPF da mãe (HELOISA 2019 × NATALIA 1992, mesmo sobrenome) era tratada como grafia e renomeada; primeiro nome e nascimento diferentes = outra pessoa → pergunta o CPF; (3) cartão de transferência em andamento mostra "nada a fazer" em vez do "peça a exclusão"; (4) "Corrigir" sem alterar nada avisa. Também 30/10: documentos do Almir (PEG8N, pedido 68953885) anexados pela API — a tela da Hapvida grava todo anexo como "carta ANS" e a confirmação recusa. API lifetools reconstruída junto.
+
 ## hc-2026.10.30-1 (30/10/2026 10:34, com o André) — hapvida-check 0d5471f + lifetools 44d05d3 · reverter: hc-2026.10.29-11
 - Ciclo de críticas + Portal de Movimentações: movimentação que volta "com críticas" e o motor deixa ESPERANDO não fica mais em silêncio. Pedido ANTERIOR da vida ainda aberto esperando documento (205/206: vínculo, CPF, declaração de saúde, carta ANS) vira ação no portal do pós-vendas ("anexe na movimentação X"), inclusive no aviso do Teams; o motivo de quem espera vai pra vida; dependente que espera o titular sobe de novo sozinho quando ele fica ativo; histórico do chamado mostra as observações em texto. Caso real: MOV-2026-000004 PEG8N, Almir (pedido 1329698 de 30/09 parado) e Magnolia — chamado estava "Na operadora" sem aviso; aplicado, virou "Aguardando você". API lifetools reconstruída junto.
 
