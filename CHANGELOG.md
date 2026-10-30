@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.30-4 (30/10/2026 16:06, com o André) — hapvida-check 7e30fb6 + lifetools 95b5f39 · reverter: hc-2026.10.30-3
+- Motor: (1) mais de um "filho" com idade impossível, ou titular com menos de 18 anos, não vira cônjuge — a data errada é a do titular (MOV-000006 l.44-46: KAUANY tinha virado esposa do titular MARCELO "2009"); (2) CEP de rua só com número ("RUA 33", Itaboraí): pesquisa "Rua 33" no ViaCEP, compara o número por extenso ("TRINTA E TRES") e o bairro desempata — antes nem pesquisava e ia ao pós-vendas (André achou no Google o 24866-696). API lifetools reconstruída junto.
+
 ## hc-2026.10.30-3 (30/10/2026 15:58, com o André) — hapvida-check c143b5e + lifetools a9e018f · reverter: hc-2026.10.30-2
 - Portal de Movimentações: VIGIA DO MOTOR — o sistema desconfia de si mesmo e avisa a TI (Teams do André, uma vez por suspeita) e grava no chamado: mesma pergunta que volta depois de o solicitante responder, "Corrigir" sem mudar nada (agora pergunta "o dado está certo?" e registra MANTEVE), nome trocado pelo da Receita por um bem diferente, mesma crítica da Hapvida depois da correção. Página "Aprendizados do motor" (gestor/Diretoria/TI): suspeitas dos últimos 30 dias + os registros datados lidos do próprio código (101 no dia). Transferência em andamento (PEDIDA/EXCLUSAO_ENVIADA, sem mais campo a corrigir) não é pendência do solicitante: sai do "Aguardando você", do sino e da contagem; bloco "nada a fazer". API lifetools reconstruída junto.
 
