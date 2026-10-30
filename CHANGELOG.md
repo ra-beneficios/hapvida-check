@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.30-3 (30/10/2026 15:58, com o André) — hapvida-check c143b5e + lifetools a9e018f · reverter: hc-2026.10.30-2
+- Portal de Movimentações: VIGIA DO MOTOR — o sistema desconfia de si mesmo e avisa a TI (Teams do André, uma vez por suspeita) e grava no chamado: mesma pergunta que volta depois de o solicitante responder, "Corrigir" sem mudar nada (agora pergunta "o dado está certo?" e registra MANTEVE), nome trocado pelo da Receita por um bem diferente, mesma crítica da Hapvida depois da correção. Página "Aprendizados do motor" (gestor/Diretoria/TI): suspeitas dos últimos 30 dias + os registros datados lidos do próprio código (101 no dia). Transferência em andamento (PEDIDA/EXCLUSAO_ENVIADA, sem mais campo a corrigir) não é pendência do solicitante: sai do "Aguardando você", do sino e da contagem; bloco "nada a fazer". API lifetools reconstruída junto.
+
 ## hc-2026.10.30-2 (30/10/2026 15:38, com o André) — hapvida-check 540438c + lifetools 001434b · reverter: hc-2026.10.30-1
 - Motor + Portal de Movimentações (MOV-2026-000006 8DAC9): (1) nome da mãe abreviado na Receita ("SEBASTIANA ROCHA F D OLIVEIRA", "EUNICE DE MELO DE O PAULO") não substitui mais o completo da planilha — a pergunta "sem abreviação" voltava mesmo com o pós-vendas confirmando; linhas 18/22 sobem de novo; (2) filha com o CPF da mãe (HELOISA 2019 × NATALIA 1992, mesmo sobrenome) era tratada como grafia e renomeada; primeiro nome e nascimento diferentes = outra pessoa → pergunta o CPF; (3) cartão de transferência em andamento mostra "nada a fazer" em vez do "peça a exclusão"; (4) "Corrigir" sem alterar nada avisa. Também 30/10: documentos do Almir (PEG8N, pedido 68953885) anexados pela API — a tela da Hapvida grava todo anexo como "carta ANS" e a confirmação recusa. API lifetools reconstruída junto.
 
