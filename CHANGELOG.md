@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.29-11 (29/10/2026 22:40, com o André) — hapvida-check bba0040 + lifetools 0398550 · reverter: hc-2026.10.29-10
+- Portal de Movimentações: lista de chamados com fonte menor (13px) e numa linha só (protocolo+etiqueta, situação, vidas e data não quebram). Só tela; API lifetools reconstruída junto.
+
 ## hc-2026.10.29-10 (29/10/2026 22:27, com o André) — hapvida-check dcf2c77 + lifetools 51f6ee2 · reverter: hc-2026.10.29-9
 - Portal de Movimentações, pontas soltas: Odonto Premium "em validação de documentos" no Legado é reconferido pela base de vidas (seg/qua/sex 02h), sem entrar no portal — CPF ativo no contrato Premium vira ATIVA, o pedido de documento sai da tela e do sininho (fica registrado que foi pedido). TI (só RA-TI) vê o erro do envio que FALHOU no chamado e repete pela tela ("Nada subiu: enviar de novo"), escrevendo o que conferiu no portal; vai pro histórico. Anexar o documento do Premium no Legado: ainda não (aguarda caso real + OK do André). API lifetools reconstruída junto.
 
