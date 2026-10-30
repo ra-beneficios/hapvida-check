@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.10.30-1 (30/10/2026 10:34, com o André) — hapvida-check 0d5471f + lifetools 44d05d3 · reverter: hc-2026.10.29-11
+- Ciclo de críticas + Portal de Movimentações: movimentação que volta "com críticas" e o motor deixa ESPERANDO não fica mais em silêncio. Pedido ANTERIOR da vida ainda aberto esperando documento (205/206: vínculo, CPF, declaração de saúde, carta ANS) vira ação no portal do pós-vendas ("anexe na movimentação X"), inclusive no aviso do Teams; o motivo de quem espera vai pra vida; dependente que espera o titular sobe de novo sozinho quando ele fica ativo; histórico do chamado mostra as observações em texto. Caso real: MOV-2026-000004 PEG8N, Almir (pedido 1329698 de 30/09 parado) e Magnolia — chamado estava "Na operadora" sem aviso; aplicado, virou "Aguardando você". API lifetools reconstruída junto.
+
 ## hc-2026.10.29-11 (29/10/2026 22:40, com o André) — hapvida-check bba0040 + lifetools 0398550 · reverter: hc-2026.10.29-10
 - Portal de Movimentações: lista de chamados com fonte menor (13px) e numa linha só (protocolo+etiqueta, situação, vidas e data não quebram). Só tela; API lifetools reconstruída junto.
 
