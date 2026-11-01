@@ -113,7 +113,11 @@ def _status_protocolo(contrato: str, protocolo: str) -> str | None:
 def _achar_protocolo(contrato: str, nome_arquivo: str, tentativas: int = 3) -> str | None:
     base = os.path.splitext(nome_arquivo)[0]
     for _ in range(tentativas):
-        dados = movimentacao_saude.checar_status_movimentacoes(os.environ.get("GCP_PROJECT"), contrato, limit=10)
+        try:  # 01/11/2026 (inspeção A2): erro aqui é DEPOIS do upload — não pode virar "não enviado"
+            dados = movimentacao_saude.checar_status_movimentacoes(os.environ.get("GCP_PROJECT"), contrato, limit=10)
+        except Exception as e:
+            print(f"[exclusao] lista de movimentações de {contrato} falhou: {type(e).__name__}: {e}")
+            dados = {}
         for m in (dados.get("content") or {}).get("movements") or []:
             if (m.get("uploadName") or "").startswith(base):
                 return str(m.get("controlCode"))

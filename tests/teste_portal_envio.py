@@ -52,8 +52,15 @@ try:
         ok(False, "reenvio do motor com o mesmo conteúdo devia ser bloqueado")
     except pe.Duplicado as d:
         ok("já foi entregue" in str(d), f"reenvio duplicado bloqueado: {d}")
-    e3 = pe.antes("ZZTST", arquivo("tmpabc.txt", "linha de teste 1\n"))
-    ok(e3 and estado(e3)[0] == "ENVIANDO", "inclusão da Cora com o mesmo conteúdo: modo sombra, sobe")
+    # 01/11/2026 (inspeção MOV, decisão 1): inclusão e exclusão também travam (30/10: 1337279 subiu duas vezes)
+    for nome in ("tmpabc.txt", "EXCLUSAO_ZZTST_1.txt"):
+        try:
+            pe.antes("ZZTST", arquivo(nome, "linha de teste 1\n"))
+            ok(False, f"{nome}: mesmo conteúdo devia ser bloqueado")
+        except pe.Duplicado as d:
+            ok(True, f"{pe.tipo_do_nome(nome)} com o mesmo conteúdo bloqueada: {d}")
+    e3 = pe.antes("ZZTST", arquivo("tmpabc.txt", "linha de teste 2\n"))
+    ok(e3 and estado(e3)[0] == "ENVIANDO", "conteúdo diferente no mesmo contrato sobe")
     pe.depois(e3, {"status": 500, "erro": "x"})
     ok(estado(e3)[0] == "FALHOU_UPLOAD", "upload sem 200 -> FALHOU_UPLOAD")
     # reconciliação: e1 aparece na lista; e3 não aparece e a lista falha numa rodada

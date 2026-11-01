@@ -6,7 +6,8 @@ Todo upload passa por movimentacao_saude.run_inclusao, que chama `antes()` e `de
   ENTREGUE/ENVIANDO/FALHOU_UPLOAD achado -> NO_PORTAL (com a movimentação); lista não respondeu -> INCERTO;
   2h sem aparecer -> FALHOU (NUNCA reenvia sozinho — regra da mesa, 17/10).
 Duplicado (mesmo conteúdo no mesmo contrato, já entregue nos últimos 7 dias e não recusado inteiro): só bloqueia nos
-tipos de ENVIO_BLOQUEIA_DUPLICADO (padrão: REENVIO, o do motor); nos outros fica registrado (modo sombra).
+tipos de ENVIO_BLOQUEIA_DUPLICADO (padrão desde 01/11/2026: os três — decisão 1 da inspeção MOV, depois que o mesmo
+arquivo subiu duas vezes em 30/10, 1337279); nos tipos fora da lista fica só registrado (modo sombra).
 Nada aqui pode derrubar um envio: falha do registro vira só log.
 """
 import hashlib
@@ -14,7 +15,7 @@ import os
 from datetime import datetime
 
 DIAS_DUPLICADO = 7
-BLOQUEIA = {t.strip().upper() for t in os.environ.get("ENVIO_BLOQUEIA_DUPLICADO", "REENVIO").split(",") if t.strip()}
+BLOQUEIA = {t.strip().upper() for t in os.environ.get("ENVIO_BLOQUEIA_DUPLICADO", "REENVIO,INCLUSAO,EXCLUSAO").split(",") if t.strip()}
 FALHA_DEPOIS_H = 2
 
 

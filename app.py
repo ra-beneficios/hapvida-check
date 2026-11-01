@@ -204,8 +204,15 @@ def run_inclusao(payload: Inclusao):
         tmp.write(conteudo)
         caminho_tmp = tmp.name
 
+    import portal_envio
     try:
         resultado = movimentacao_saude.run_inclusao(project, payload.codigo_contrato.upper(), caminho_tmp)
+    except portal_envio.Duplicado as e:
+        # 01/11/2026 (inspeção MOV, decisão 1): o mesmo arquivo já foi entregue neste contrato nos últimos 7 dias —
+        # não sobe; quem chamou recebe o envio anterior (com a movimentação, se já achada) para conferir, não repetir
+        d = e.envio
+        return {"status": 409, "duplicado": True, "erro": str(e), "envio_anterior": d["id"],
+                "protocolo_portal": d.get("protocolo"), "estado_anterior": d.get("estado")}
     finally:
         os.unlink(caminho_tmp)
     # 17/10/2026 (André: "ter certeza que 'vidas enviadas à Hapvida' é verdade"): o 200 do upload não prova que a
@@ -214,7 +221,6 @@ def run_inclusao(payload: Inclusao):
         try:
             resultado["protocolo_portal"] = ciclo_criticas._achar_protocolo(
                 payload.codigo_contrato.upper(), os.path.basename(caminho_tmp), tentativas=2)
-            import portal_envio
             portal_envio.conferido(os.path.basename(caminho_tmp), resultado["protocolo_portal"])
         except Exception as e:
             print(f"[run-inclusao] não consegui conferir na lista do portal: {type(e).__name__}: {e}")
