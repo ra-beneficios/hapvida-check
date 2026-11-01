@@ -2,6 +2,14 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.01-1 (01/11/2026 18:01, autorizado pelo André: onda "hoje" da inspeção MOV, decisões 1 e 2; --forcar-janela por ser dia 1, fora das 8h–18h e com a fila vazia) — hapvida-check 2aedd01 + lifetools 307cc3f · reverter: hc-2026.10.30-6
+- Trava de envio repetido (decisão 1): o mesmo arquivo no mesmo contrato não sobe de novo em 7 dias, agora também na inclusão e na exclusão (antes só no reenvio do motor; em 30/10 o 1337279 subiu duas vezes e a trava deixou passar em "modo sombra"). /run-inclusao devolve 409 com o envio anterior; o "repetir" da TI no portal recusa o que já chegou ao portal.
+- Exclusão: erro na lista de movimentações depois do upload não vira mais "não enviado" (31/10: onda 2 da 4DFEV, 1337619).
+- Motor 0.4.16: CPF cujo nascimento na Receita difere mais de 1 ano do arquivo é de outra pessoa (pergunta o CPF; a filha com o CPF da mãe e o mesmo primeiro nome não vira a mãe). Também entram no ar e470dfb (planilha WP64K com 1 milhão de linhas vazias) e e0cc4ee (CPF repetido cita a 1ª linha), que estavam na main e fora do ar.
+- Portal de Movimentações: reanálise de transferência só seg–sex, 8h–18h, 1x/dia; "Nada a fazer" da Hapvida vai para a espera.
+- Comissão (auditoria do Contas a Receber, achado 2, sessão Ct_Receber): página inválida do portal (HTTP ≠ 200, pedido ilegível, coluna faltando, tabela ausente com lote aberto) vira erro e nenhuma baixa.
+- nginx do host e da intranet: client_max_body_size 26m (antes 1 MB → 413). API lifetools reconstruída junto.
+
 ## hc-2026.10.30-6 (30/10/2026 16:45, com o André) — hapvida-check ef07f95 + lifetools fec3b9d · reverter: hc-2026.10.30-5
 - Motor: "titular tinha X anos quando o filho nasceu" mostra as datas que estão na planilha; titular nascido depois do filho manda corrigir no cartão do titular (MOV-000006 l.46: o André leu "-2 anos" com o titular de 1982 na cabeça, mas a planilha tinha 2009). API lifetools reconstruída junto.
 
