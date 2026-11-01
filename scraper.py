@@ -20,6 +20,8 @@ LOGIN_URL = "https://webhap.hapvida.com.br/pls/webhap/pk_controle_comissao.Login
 # e upsert_pedidos() interpretava "sumiu da lista" como "foi pago", dando
 # baixa falsa em 37 comissões reais (~R$1.013) que continuavam em aberto.
 # Ver 150_bug_scraper_comissao_pk_portal_nota_fiscal_RESULTADO.md.
+# 01/11/2026: o buraco foi fechado (PortalConsultaError): HTTP != 200, pedido ilegível ou
+# tabela ausente com lote aberto viram erro do código, nunca baixa.
 CONSULTA_URL_TEMPLATE = (
     "https://webhap.hapvida.com.br/pls/webhap/pk_portal_nota_fiscal.consultaNotaFiscal"
     "?pIdSessao={sessao}&pOpcao=I&pDtRef={ano}"
@@ -31,6 +33,10 @@ LOGIN_INTERVAL_SECONDS = 8
 
 class SessionExpiredError(Exception):
     pass
+
+
+class PortalConsultaError(Exception):
+    """A consulta não trouxe a lista de pedidos: nada dela pode virar baixa (incidente de 21/08)."""
 
 
 # --- Secret Manager -------------------------------------------------------
@@ -88,7 +94,9 @@ def parse_data(raw: str) -> date:
     return datetime.strptime(raw.strip(), "%d/%m/%Y").date()
 
 
-def parse_table(html: str) -> list[dict]:
+def parse_table(html: str) -> list[dict] | None:
+    """Pedidos em aberto da página. None = não achou a tabela, o que não é o mesmo que lista vazia: não se sabe como o
+    portal mostra um código sem pedido, então só upsert_pedidos, que sabe se havia lote aberto, decide se é erro."""
     soup = BeautifulSoup(html, "html.parser")
 
     target_table = None
@@ -98,7 +106,7 @@ def parse_table(html: str) -> list[dict]:
             target_table = table
             break
     if target_table is None:
-        return []
+        return None
 
     rows = target_table.find_all("tr")
     header_idx = None
@@ -118,7 +126,10 @@ def parse_table(html: str) -> list[dict]:
             header_idx = i
             break
     if header_idx is None:
-        return []
+        return None
+    faltam = {"numero_pedido", "data_integracao", "valor"} - col_index.keys()
+    if faltam:
+        raise PortalConsultaError(f"tabela de pedidos sem as colunas {sorted(faltam)}")
 
     results = []
     for row in rows[header_idx + 1:]:
@@ -134,7 +145,10 @@ def parse_table(html: str) -> list[dict]:
                     "valor": normalize_valor(cells[col_index["valor"]]),
                 }
             )
-        except (ValueError, IndexError):
+        except (ValueError, IndexError) as e:
+            # Pedido que não se lê não pode sumir da lista: viraria baixa. Sem número é rodapé (Total).
+            if any(ch.isdigit() for ch in cells[col_index["numero_pedido"]]):
+                raise PortalConsultaError(f"pedido {cells[col_index['numero_pedido']]} ilegível: {e}") from e
             continue
     return results
 
@@ -167,20 +181,23 @@ class HapvidaAdapter:
             )
         return sessao
 
-    def fetch_open_invoices(self, sessao: str, ano: int) -> list[dict]:
+    def fetch_open_invoices(self, sessao: str, ano: int) -> list[dict] | None:
         url = CONSULTA_URL_TEMPLATE.format(sessao=sessao, ano=ano)
         page = self.page
-        page.goto(url)
+        resposta = page.goto(url)
         content = page.content()
         if "SESSÃO EXPIROU" in content.upper() or "SESSAO EXPIROU" in content.upper():
             raise SessionExpiredError(f"Sessão expirou para pDtRef={ano}")
+        if resposta is None or resposta.status != 200:
+            status = resposta.status if resposta else "sem resposta"
+            raise PortalConsultaError(f"consulta de pedidos devolveu HTTP {status}")
         return parse_table(content)
 
 
 # --- Persistência ------------------------------------------------------------
 
 
-def upsert_pedidos(conn, codigo: str, ano: int, hoje: date, rows: list[dict]) -> None:
+def upsert_pedidos(conn, codigo: str, ano: int, hoje: date, rows: list[dict] | None) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -190,6 +207,14 @@ def upsert_pedidos(conn, codigo: str, ano: int, hoje: date, rows: list[dict]) ->
             (HAPVIDA_OPERADORA_ID, codigo, ano),
         )
         previously_open = {(r[0], r[1] or "") for r in cur.fetchall()}
+
+        if rows is None:
+            if previously_open:
+                raise PortalConsultaError(
+                    f"tabela de pedidos não encontrada com {len(previously_open)} lote(s) aberto(s); nenhuma baixa feita"
+                )
+            conn.commit()
+            return
 
         seen = set()
         for row in rows:
@@ -357,6 +382,10 @@ def run_all() -> dict:
                                 try:
                                     rows = adapter.fetch_open_invoices(sessao, ano)
                                     upsert_pedidos(conn, codigo, ano, hoje, rows)
+                                    break
+                                except PortalConsultaError as e:
+                                    conn.rollback()
+                                    erros.append({"codigo": codigo, "ano": ano, "erro": str(e)})
                                     break
                                 except SessionExpiredError:
                                     if tentativas >= MAX_LOGIN_RETRIES:
