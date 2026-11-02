@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.02-6 (02/11/2026 17:55, feriado, autorizado pelo André; fila vazia) — hapvida-check sem mudança de código + lifetools 9262e13 · reverter: hc-2026.11.02-5
+- NFs, 2ª entrega da sessão Receitas: rotina diária `nf/sync_diario.sh` com vigia, lote Hapvida conferido (pelo arquivo ou pelo valor), abas MedSênior, Bradesco e Nossa Saúde com "Falta fonte", baixa por extrato pronta mas não executada. A API passa a ter 14 operadoras em `receber.py`.
+
 ## hc-2026.11.02-5 (02/11/2026 16:37, feriado, autorizado pelo André; fila vazia, 0 envio em andamento) — hapvida-check sem mudança de código + lifetools c539e28 · reverter: hc-2026.11.02-4
 - Contas a Receber por operadora (sessão Ct_Receber): rotas /auth/financeiro/receber/op/{op} e /auth/gerencial/receber (só leitura, lista fechada de views; sem a view, "controle em carga"), tela CEO com "NF integrada" e recebido só com extrato, menu "Previsão de comissão", rotas do painel síncronas. Sem SQL.
 
