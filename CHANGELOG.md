@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.02-4 (02/11/2026 09:54, feriado, autorizado pelo André) — hapvida-check 3458daf + lifetools c7cf665 · reverter: hc-2026.11.02-3
+- Inspeção MOV A14 (API lifetools): rotas do portal, do Contas a Pagar e do financeiro fora do event loop — uma consulta presa não congela mais o /auth/me da intranet inteira (tests/test_event_loop.py). hapvida-check sem mudança de código.
+
 ## hc-2026.11.02-3 (02/11/2026 09:48, feriado, autorizado pelo André: "publicar hoje com --forcar-janela, em fila"; fila vazia) — hapvida-check 20acb79 + lifetools d1ff477 · reverter: hc-2026.11.02-2
 - Motor 0.4.17: nome "abreviado" (letra solta que para nós é partícula) que a Receita tem igual ao arquivo não reenvia sozinho — vai ao pós-vendas. Em 8DAC9 a mesma linha subiu 2x (1337391 → 1337744) e a trava de duplicidade barrou a 3ª (exec 210).
 - Reenvio que a trava barra por ser igual ao já recusado: as linhas voltam ao responsável (antes a execução morria DESCARTADA calada). O acompanhamento do reenvio herda o chamado da origem (o resultado da rodada 2 volta à tela).
