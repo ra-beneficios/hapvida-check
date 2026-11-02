@@ -2,6 +2,12 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.01-2 (01/11/2026 23:25, autorizado pelo André: onda "esta semana" A4/A6/A12/A13 + Contas a Pagar #5–#10; --forcar-janela por ser dia 1, fila vazia) — hapvida-check fd12a58 + lifetools 1d89a42 · reverter: hc-2026.11.01-1
+- A6: vez única na conta Cora — vigia #154, ciclo_inclusao, pedidos_digitacao (por contrato) e as rotinas da manhã (copart, boletos, documentos, DAVJV) esperam o lock 727003, o mesmo do lifetools. **Desligar sem publicar:** `PORTAL_VEZ=observar` no ambiente do container (docker-compose do hapvida-check) + `docker compose up -d` — volta a só registrar em portal.uso.
+- A4: Saúde que vira ATIVA pela reanálise põe o Odonto Premium na fila. A12: transferência retoma de onde parou (não exclui de novo; e-mail de exclusão imediata com chave). A13: tempo limite por rota no hapvida-check; estourou = falha "incerta" que não volta pra fila.
+- Ferramenta regularizar_envio_exclusao.py (A2/A22) dentro da imagem.
+- Contas a Pagar (API lifetools): histórico das receitas (SQL 188), registro de abertura de anexo pessoal, datas impossíveis e futuras recusadas, nome de anexo com acento. Tela do Contas a Receber: "NF integrada" e CSV sem fórmula. API lifetools reconstruída junto.
+
 ## hc-2026.11.01-1 (01/11/2026 18:01, autorizado pelo André: onda "hoje" da inspeção MOV, decisões 1 e 2; --forcar-janela por ser dia 1, fora das 8h–18h e com a fila vazia) — hapvida-check 2aedd01 + lifetools 307cc3f · reverter: hc-2026.10.30-6
 - Trava de envio repetido (decisão 1): o mesmo arquivo no mesmo contrato não sobe de novo em 7 dias, agora também na inclusão e na exclusão (antes só no reenvio do motor; em 30/10 o 1337279 subiu duas vezes e a trava deixou passar em "modo sombra"). /run-inclusao devolve 409 com o envio anterior; o "repetir" da TI no portal recusa o que já chegou ao portal.
 - Exclusão: erro na lista de movimentações depois do upload não vira mais "não enviado" (31/10: onda 2 da 4DFEV, 1337619).
