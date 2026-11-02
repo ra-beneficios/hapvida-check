@@ -82,8 +82,8 @@ def regularizar(cur, servico, pastas, lote: str, onda: str, autor: str, motivo: 
         feito.append(f"lote: grava o envio da onda {onda} (movimentação {p['protocolo']})")
         if aplicar:
             servico.registrar_envio(lote, envio, pastas)
-    cur.execute("SELECT id FROM movimentacoes_hapvida_acompanhamento WHERE nome_arquivo = %s ORDER BY id DESC LIMIT 1",
-                (alvo["arquivo"],))
+    cur.execute("""SELECT id, status, solicitante_nome, controle_portal FROM movimentacoes_hapvida_acompanhamento
+                    WHERE nome_arquivo = %s ORDER BY id DESC LIMIT 1""", (alvo["arquivo"],))
     acomp = cur.fetchone()
     tit = next((e for e in estado.get("envios") or [] if e.get("onda") == "titulares" and e.get("contrato") == alvo["contrato"]), {})
     cid = None
@@ -92,17 +92,34 @@ def regularizar(cur, servico, pastas, lote: str, onda: str, autor: str, motivo: 
                     "ORDER BY id DESC LIMIT 1", (tit["arquivo"],))
         r = cur.fetchone()
         cid = r[0] if r else None
-    if acomp:
+    # 01/11/2026 23h (achado na 1ª execução): o vigia casa a movimentação por controle_portal ou pelo horário de envio
+    # (enviado_em) — sem os dois, procura perto da hora da regularização, não acha e marca FALHOU com aviso falso
+    if acomp and str(acomp[2] or "").startswith("Regularização") and (acomp[1] == "FALHOU" or not acomp[3]):
+        feito.append(f"acompanhamento: conserta o {acomp[0]} criado pela regularização (movimentação e horário do envio)")
+        if aplicar:
+            cur.execute("""UPDATE movimentacoes_hapvida_acompanhamento
+                              SET controle_portal = %s, enviado_em = %s, status = 'AGUARDANDO_CHECAGEM_INICIAL',
+                                  detalhe_status = NULL, notificado_em = NULL, proxima_checagem_em = now()
+                            WHERE id = %s""", (str(p["protocolo"]), p["criado_em"], acomp[0]))
+            if cid and evento:
+                evento(cur, cid, "NOTA", {
+                    "obs": (f"Desconsiderar o aviso \"não apareceu na lista de movimentações\" da exclusão {alvo['contrato']} "
+                            f"(movimentação {p['protocolo']}): foi falha da regularização, que não informou ao vigia a "
+                            f"movimentação nem o horário do envio. A movimentação está no portal desde "
+                            f"{p['criado_em'].astimezone():%d/%m/%Y %H:%M}; acompanhamento {acomp[0]} corrigido, o vigia "
+                            f"confere de novo. {motivo}"),
+                    "autor": autor, "regularizado": alvo["arquivo"] + ":conserto", "protocolo_portal": str(p["protocolo"])})
+    elif acomp:
         feito.append(f"acompanhamento: já existe ({acomp[0]})")
     else:
         feito.append(f"acompanhamento: cria (vigia confere na próxima rodada), chamado {cid or '—'}")
-        if aplicar:  # mesmas colunas da onda 2 automática (verificar_acompanhamentos._enviar_onda2)
+        if aplicar:  # mesmas colunas da onda 2 automática (verificar_acompanhamentos._enviar_onda2) + como o vigia acha
             cur.execute("""INSERT INTO movimentacoes_hapvida_acompanhamento
-                             (codigo_contrato, confirmacao_upload, nome_arquivo, total_vidas, solicitante_upn, solicitante_nome,
-                              proxima_checagem_em, mov_chamado_id)
-                           VALUES (%s, %s, %s, %s, %s, %s, now(), %s)""",
-                        (alvo["contrato"], str(p["protocolo"]), alvo["arquivo"], alvo.get("linhas"),
-                         estado["solicitante_upn"], f"Regularização ({autor})", cid))
+                             (codigo_contrato, confirmacao_upload, controle_portal, enviado_em, nome_arquivo, total_vidas,
+                              solicitante_upn, solicitante_nome, proxima_checagem_em, mov_chamado_id)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now(), %s)""",
+                        (alvo["contrato"], str(p["protocolo"]), str(p["protocolo"]), p["criado_em"], alvo["arquivo"],
+                         alvo.get("linhas"), estado["solicitante_upn"], f"Regularização ({autor})", cid))
     if cid:
         cur.execute("SELECT 1 FROM movimentacoes.evento WHERE chamado_id = %s AND tipo = 'NOTA' "
                     "AND detalhe->>'regularizado' = %s", (cid, alvo["arquivo"]))

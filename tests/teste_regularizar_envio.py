@@ -44,14 +44,17 @@ class Banco:
 
     def __init__(self, tem_prova=True):
         self.prova = (472, "1337619", "NO_PORTAL", QUANDO) if tem_prova else None
-        self.acomp, self.notas, self._r = [], [], None
+        self.acomp, self.notas, self.consertos, self._r, self.status = [], [], [], None, "AGUARDANDO_CHECAGEM_INICIAL"
 
     def execute(self, sql, args=None):
         s = " ".join(sql.split())
         if "FROM portal.envio" in s:
             self._r = self.prova if args[1] == SHA else None
-        elif s.startswith("SELECT id FROM movimentacoes_hapvida_acompanhamento"):
-            self._r = (99,) if any(a[2] == args[0] for a in self.acomp) else None
+        elif s.startswith("SELECT id, status, solicitante_nome, controle_portal FROM movimentacoes_hapvida_acompanhamento"):
+            self._r = next(((99, self.status, a[7], a[2]) for a in self.acomp if a[4] == args[0]), None)
+        elif s.startswith("UPDATE movimentacoes_hapvida_acompanhamento"):
+            self.consertos.append(args)
+            self.status = "AGUARDANDO_CHECAGEM_INICIAL"
         elif s.startswith("SELECT mov_chamado_id"):
             self._r = (6,) if args[0] == TIT["arquivo"] else None
         elif s.startswith("INSERT INTO movimentacoes_hapvida_acompanhamento"):
@@ -80,7 +83,9 @@ est = servico.ler_estado(nome, PASTAS)
 dep = [e for e in est["envios"] if e["onda"] == "dependentes"]
 ok(len(dep) == 1 and dep[0]["protocolo"] == "1337619" and dep[0]["regularizado"]["portal_envio"] == 472,
    "B: envio gravado no lote com a movimentação e a origem da regularização")
-ok(len(b.acomp) == 1 and b.acomp[0][1] == "1337619" and b.acomp[0][6] == 6, "B: acompanhamento criado, ligado ao chamado 6")
+ok(len(b.acomp) == 1 and b.acomp[0][1] == "1337619" and b.acomp[0][8] == 6, "B: acompanhamento criado, ligado ao chamado 6")
+ok(b.acomp[0][2] == "1337619" and b.acomp[0][3] == QUANDO,
+   "B: com a movimentação (controle_portal) e o horário do envio — o vigia acha (23h: sem eles marcou FALHOU)")
 ok(len(b.notas) == 1 and b.notas[0][0] == 6 and b.notas[0][2] == "NOTA" and b.notas[0][3]["autor"] == "andre@ra",
    "B: NOTA no chamado com autor")
 
@@ -89,6 +94,13 @@ reg.regularizar(b, servico, PASTAS, nome, "dependentes", "andre@ra", "conferido 
 est = servico.ler_estado(nome, PASTAS)
 ok(len([e for e in est["envios"] if e["onda"] == "dependentes"]) == 1 and len(b.acomp) == 1 and len(b.notas) == 1,
    "C: rodar 2x não duplica")
+
+# C2. acompanhamento da regularização que o vigia marcou FALHOU (1ª versão da ferramenta): conserta, sem criar outro
+b.status = "FALHOU"
+passos = reg.regularizar(b, servico, PASTAS, nome, "dependentes", "andre@ra", "conferido no portal.envio 472", True, b.evento)
+ok(len(b.consertos) == 1 and b.consertos[0][:2] == ("1337619", QUANDO) and len(b.acomp) == 1,
+   "C2: acompanhamento FALHOU da regularização volta a aguardar, com movimentação e horário")
+ok(len(b.notas) == 2 and "Desconsiderar" in b.notas[1][3]["obs"], "C2: NOTA no chamado desmentindo o aviso falso")
 
 # D. sem prova no portal: para sem mudar nada
 nome = lote("D")
