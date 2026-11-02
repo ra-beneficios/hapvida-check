@@ -531,4 +531,9 @@ def decidir(inclusao_id: int, acao: str, por: str) -> dict:
 
 
 if __name__ == "__main__":
-    run(simular="--simular" in sys.argv)
+    import portal_vez
+    try:   # 01/11/2026 (inspeção MOV, A6): uma rotina por vez na conta Cora (o mesmo lock do lifetools)
+        with portal_vez.vez():
+            run(simular="--simular" in sys.argv)
+    except portal_vez.PortalOcupado as e:
+        print(f"[ciclo_inclusao] {e} — pulo esta rodada")

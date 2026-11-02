@@ -17,6 +17,7 @@ import documentos_saude
 import enviar_documentos
 import exclusao_api
 import movimentacao_saude
+import portal_vez
 import scraper
 
 app = FastAPI()
@@ -103,6 +104,7 @@ def run_censo_saude():
 
 
 @app.post("/run-copart-saude")
+@portal_vez.na_vez   # 01/11/2026 (inspeção MOV, A6): uma rotina por vez na conta Cora
 def run_copart_saude():
     """Grupo saude (0KFXW/WARQU + coligadas) - detalhe por procedimento do Copart, ciclo
     aberto (#106). Grava de verdade em copart_saude_detalhe (banco lifetools) - nao e dry-run,
@@ -113,6 +115,7 @@ def run_copart_saude():
 
 
 @app.post("/run-boletos-saude")
+@portal_vez.na_vez   # 01/11/2026 (inspeção MOV, A6): uma rotina por vez na conta Cora
 def run_boletos_saude():
     """Grupo saude (0KFXW/WARQU + coligadas) - faturas/boletos via
     billings/partner-company/{codigo}/bills/search (#84). Grava de verdade
@@ -123,6 +126,7 @@ def run_boletos_saude():
 
 
 @app.post("/run-mapear-documentos-saude")
+@portal_vez.na_vez   # 01/11/2026 (inspeção MOV, A6): uma rotina por vez na conta Cora
 def run_mapear_documentos_saude():
     """Grupo saude - checa disponibilidade de Nota Fiscal e Relatorio Analitico
     (PDF) na fatura mais recente de cada contrato, grava em `faturas`
@@ -134,6 +138,7 @@ def run_mapear_documentos_saude():
 
 
 @app.post("/run-davjv-marco")
+@portal_vez.na_vez   # 01/11/2026 (inspeção MOV, A6): uma rotina por vez na conta Cora
 def run_davjv_marco():
     """DAVJV (#147) - a conta da Carol (hapvida-portal-saude) NAO tem acesso
     a esse contrato (create-session dava 400 Bad Request desde 31/07). A

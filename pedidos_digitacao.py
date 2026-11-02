@@ -154,13 +154,15 @@ def tratar_contrato(contrato: str, executar: bool) -> list[dict]:
 
 
 if __name__ == "__main__":
+    import portal_vez
     args = sys.argv[1:]
     executar = "--executar" in args
     contratos = contratos_saude() if "--todos" in args else [a for a in args if not a.startswith("--")]
     todos = []
     for ct in contratos:
-        try:
-            r = tratar_contrato(ct.upper(), executar)
+        try:   # 01/11/2026 (inspeção MOV, A6): a vez é por contrato — o lifetools pode entrar entre um e outro
+            with portal_vez.vez():
+                r = tratar_contrato(ct.upper(), executar)
         except Exception as e:
             if "nao encontrado na busca" in str(e):   # código que o login da Cora não enxerga (9WLZU, ERQ43, ICBJY, Z8TUR)
                 print(f"{ct}: fora do login do portal - ignorado", flush=True)
