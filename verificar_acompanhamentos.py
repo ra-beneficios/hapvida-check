@@ -655,4 +655,9 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    run()
+    import portal_vez
+    try:   # 01/11/2026 (inspeção MOV, A6): uma rotina por vez na conta Cora (o mesmo lock do lifetools)
+        with portal_vez.vez():
+            run()
+    except portal_vez.PortalOcupado as e:
+        print(f"[vigia] {e} — pulo esta rodada")
