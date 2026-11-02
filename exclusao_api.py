@@ -98,8 +98,9 @@ def analisar(planilha_base64: str, nome_arquivo: str, solicitante_upn: str) -> d
     return servico.analisar_planilha(conteudo, nome_arquivo, solicitante_upn, fontes, _pastas())
 
 
-def aprovar(lote: str, aprovador_upn: str, checklist_ok: bool, decisoes: dict) -> dict:
-    return servico.aprovar(lote, aprovador_upn, checklist_ok, decisoes or {}, _pastas())
+def aprovar(lote: str, aprovador_upn: str, checklist_ok: bool, decisoes: dict, checklist_nao_se_aplica: str | None = None) -> dict:
+    return servico.aprovar(lote, aprovador_upn, checklist_ok, decisoes or {}, _pastas(),
+                           checklist_nao_se_aplica=checklist_nao_se_aplica)
 
 
 def _status_protocolo(contrato: str, protocolo: str) -> str | None:
