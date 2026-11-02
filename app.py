@@ -306,6 +306,7 @@ class ExclusaoAprovar(BaseModel):
     aprovador_upn: str
     checklist_ok: bool = False
     decisoes: dict = {}
+    checklist_nao_se_aplica: str | None = None   # 02/11/2026 (A15): transferência no grupo — art. 30/31 não se aplica
 
 
 class ExclusaoEnviar(BaseModel):
@@ -330,7 +331,7 @@ def exclusao_analisar(p: ExclusaoAnalisar):
 
 @app.post("/exclusao/aprovar")
 def exclusao_aprovar(p: ExclusaoAprovar):
-    return _exclusao(exclusao_api.aprovar, p.lote, p.aprovador_upn, p.checklist_ok, p.decisoes)
+    return _exclusao(exclusao_api.aprovar, p.lote, p.aprovador_upn, p.checklist_ok, p.decisoes, p.checklist_nao_se_aplica)
 
 
 @app.post("/exclusao/enviar")

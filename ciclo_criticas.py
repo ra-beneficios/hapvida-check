@@ -191,6 +191,7 @@ def _ciclo_exclusao(contrato: str, controle: str, pasta: Path, conn_l, solicitan
         wb.save(arq)
         os.chmod(arq, 0o600)
     return {"tipo": "EXCLUSAO", "contrato": contrato, "controle": controle, "recusadas": len(itens),
+            "criticas": [f"linha {int(i['linha'])}: {i['criticas'] or i['status']}" for i in itens],
             "nao_mapeadas": sum("CRITICA_NAO_MAPEADA" in i["categorias"] for i in itens),
             "responsavel": resp, "arquivo_responsavel": str(arq) if arq else None}
 
@@ -224,6 +225,16 @@ def _notificar(r: dict, contexto: dict) -> None:
                  + (f"{r['recusadas']} vida(s) não foram excluídas pela Hapvida — lista no anexo. Por enquanto o motor "
                     "não corrige exclusão sozinho: cada caso precisa de alguém."
                     if r["recusadas"] else "todas as vidas foram excluídas. ✅"))
+        # 02/11/2026 (inspeção MOV, A9; 2XP6W 1337653): exclusão aberta por chamado (inclusive a da transferência) volta
+        # para o histórico do chamado, não para o Teams do responsável do contrato de origem
+        no_chamado = (f"Exclusão {r['contrato']}, movimentação {r['controle']}: "
+                      + (f"{r['recusadas']} vida(s) não foram excluídas pela Hapvida — " + "; ".join(r.get("criticas") or [])[:1500]
+                         if r["recusadas"] else "todas as vidas foram excluídas."))
+        if _exclusao_no_chamado(contexto.get("acompanhamento_id"), no_chamado):
+            if r["nao_mapeadas"]:
+                _cora("/notificar", {"upn": ciclo.ADMIN, "texto": f"🧩 Lacuna no catálogo do motor: {r['nao_mapeadas']} "
+                                     f"crítica(s) de exclusão sem mapeamento ({r['contrato']}/{r['controle']})."})
+            return
         if r["arquivo_responsavel"]:
             _cora("/notificar-arquivo", {"upn": r["responsavel"]["upn"], "texto": texto,
                                          "arquivo_base64": _arquivo_b64(r["arquivo_responsavel"]),
@@ -271,6 +282,16 @@ def _notificar(r: dict, contexto: dict) -> None:
             "responsavel": resp["nome"], "origem": contexto.get("origem"),
             "relatorio_base64": _arquivo_b64(r["relatorio"]),
             "relatorio_nome": f"Motor_{r['contrato']}_{r['controle']}_decisoes.xlsx"})
+
+
+def _exclusao_no_chamado(acompanhamento_id, texto: str) -> bool:
+    """True = a exclusão é de um chamado e o texto foi para o histórico dele. Sem módulo/banco: False (segue o Teams)."""
+    try:
+        from movimentacoes import exclusao
+        return bool(exclusao.avisar(acompanhamento_id, texto))
+    except Exception as e:
+        print(f"[ciclo] não consegui devolver a exclusão pro chamado ({type(e).__name__}: {e}); sigo com o aviso de sempre")
+        return False
 
 
 def _volta_pro_chamado(r: dict, contexto: dict) -> bool:
@@ -365,7 +386,21 @@ def aprovar(eid: int, escopo: str, aprovado_por: str, sistema: bool = False) -> 
             up = ms.run_inclusao(os.environ.get("GCP_PROJECT", ""), contrato, str(caminho))
         except portal_envio.Duplicado as e:   # 17/10/2026 (obra 2): o mesmo arquivo já foi entregue — não sobe de novo
             persistencia.marcar_desfecho(conn_s, eid, "DESCARTADA", aprovado_por, {"motivo": f"duplicado: {e}"})
-            return {"enviado": False, "status": None, "contrato": contrato, "linhas": len(linhas), "motivo": str(e)}
+            # 02/11/2026 (8DAC9 exec 210): a Hapvida já recusou este mesmo arquivo — o motor não resolveu essas linhas.
+            # Antes a execução morria calada (DESCARTADA) e a vida ficava parada; agora volta ao responsável.
+            comp = None
+            if sistema:
+                conn_l = _conn_leitura()
+                try:
+                    comp = ciclo.complemento_para_responsavel(
+                        conn_l, conn_s, eid, motivo="A Hapvida já recusou esta mesma linha e o motor não tem outra correção: "
+                                                    "confirmar o dado com o cliente.")
+                finally:
+                    conn_l.close()
+                if comp:
+                    _notificar_complemento(comp, repetida=True)
+            return {"enviado": False, "status": None, "contrato": contrato, "linhas": len(linhas), "motivo": str(e),
+                    "complemento": comp["linhas"] if comp else 0}
         finally:
             caminho.unlink(missing_ok=True)
         status = up.get("status")
@@ -518,11 +553,13 @@ def descartar(eid: int, por: str) -> dict:
         conn_s.close()
 
 
-def _notificar_complemento(comp: dict) -> None:
+def _notificar_complemento(comp: dict, repetida: bool = False) -> None:
+    porque = ("a Hapvida já tinha recusado o mesmo arquivo e o motor não tem outra correção" if repetida
+              else "o cartão não aprovou essas linhas")
     _cora("/notificar-arquivo", {
         "upn": comp["responsavel"]["upn"],
         "texto": f"📋 **{comp['contrato']}, movimentação {comp['controle']}**: {comp['linhas']} linha(s) que o motor tinha "
-                 "corrigido não foram reenviadas (o cartão não aprovou essas linhas). Estão no anexo, com a sugestão do motor — "
+                 f"corrigido não foram reenviadas ({porque}). Estão no anexo, com a sugestão do motor — "
                  "confirme com o cliente e me devolva escrevendo **correção motor de críticas**.",
         "arquivo_base64": _arquivo_b64(comp["arquivo_responsavel"]),
         "nome_arquivo": Path(comp["arquivo_responsavel"]).name})
@@ -540,14 +577,17 @@ def _achar_protocolo(contrato: str, nome_arquivo: str, tentativas: int = 3) -> s
 
 
 def _registrar_acompanhamento(conn_l, contrato, confirmacao, protocolo, nome, linhas, ctx, eid) -> None:
-    """O reenvio entra no mesmo vigia (#154) com rodada+1 — 12h depois o ciclo roda de novo nele."""
+    """O reenvio entra no mesmo vigia (#154) com rodada+1 — 12h depois o ciclo roda de novo nele.
+    02/11/2026 (8DAC9 1337744, MOV-000006): herda o chamado do acompanhamento de origem — sem isso o resultado da
+    rodada 2 não voltava para a tela do chamado (ia para o Teams ou sumia)."""
     with conn_l, conn_l.cursor() as cur:
         cur.execute("""INSERT INTO movimentacoes_hapvida_acompanhamento
                          (codigo_contrato, confirmacao_upload, nome_arquivo, total_vidas, solicitante_upn,
-                          solicitante_nome, proxima_checagem_em, rodada, execucao_origem_id, controle_portal)
-                       VALUES (%s,%s,%s,%s,%s,%s, now() + interval '45 minutes', %s, %s, %s)""",
+                          solicitante_nome, proxima_checagem_em, rodada, execucao_origem_id, controle_portal, mov_chamado_id)
+                       VALUES (%s,%s,%s,%s,%s,%s, now() + interval '45 minutes', %s, %s, %s,
+                               (SELECT mov_chamado_id FROM movimentacoes_hapvida_acompanhamento WHERE id = %s))""",
                     (contrato, confirmacao or protocolo, nome, linhas, ctx.get("solicitante") or ciclo.ADMIN,
-                     "Motor de Críticas", int(ctx.get("rodada") or 1) + 1, eid, protocolo))
+                     "Motor de Críticas", int(ctx.get("rodada") or 1) + 1, eid, protocolo, ctx.get("acompanhamento_id")))
 
 
 # ── gancho do vigia ──────────────────────────────────────────────────────────────────────────────
