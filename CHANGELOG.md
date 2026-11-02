@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.02-5 (02/11/2026 16:37, feriado, autorizado pelo André; fila vazia, 0 envio em andamento) — hapvida-check sem mudança de código + lifetools c539e28 · reverter: hc-2026.11.02-4
+- Contas a Receber por operadora (sessão Ct_Receber): rotas /auth/financeiro/receber/op/{op} e /auth/gerencial/receber (só leitura, lista fechada de views; sem a view, "controle em carga"), tela CEO com "NF integrada" e recebido só com extrato, menu "Previsão de comissão", rotas do painel síncronas. Sem SQL.
+
 ## hc-2026.11.02-4 (02/11/2026 09:54, feriado, autorizado pelo André) — hapvida-check 3458daf + lifetools c7cf665 · reverter: hc-2026.11.02-3
 - Inspeção MOV A14 (API lifetools): rotas do portal, do Contas a Pagar e do financeiro fora do event loop — uma consulta presa não congela mais o /auth/me da intranet inteira (tests/test_event_loop.py). hapvida-check sem mudança de código.
 
