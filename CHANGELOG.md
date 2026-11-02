@@ -2,6 +2,15 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.02-3 (02/11/2026 09:48, feriado, autorizado pelo André: "publicar hoje com --forcar-janela, em fila"; fila vazia) — hapvida-check 20acb79 + lifetools d1ff477 · reverter: hc-2026.11.02-2
+- Motor 0.4.17: nome "abreviado" (letra solta que para nós é partícula) que a Receita tem igual ao arquivo não reenvia sozinho — vai ao pós-vendas. Em 8DAC9 a mesma linha subiu 2x (1337391 → 1337744) e a trava de duplicidade barrou a 3ª (exec 210).
+- Reenvio que a trava barra por ser igual ao já recusado: as linhas voltam ao responsável (antes a execução morria DESCARTADA calada). O acompanhamento do reenvio herda o chamado da origem (o resultado da rodada 2 volta à tela).
+- Inspeção MOV: A9 (crítica de exclusão de chamado, inclusive a da origem na transferência, vai pro chamado; evento com o contrato da exclusão), A15 (art. 30/31 "não se aplica" na transferência), A16 (carteirinha pela linha), A17 (crítica da Hapvida na transferência aparece), A18 (um predicado de pendência), A19 (carimbo no log, prova por vida no e-mail, log do container guardado antes de recriar), A21 (planilha > 200 MB descompactados recusada), A25 (fuso na tela), A26–A28.
+- Publicador: testes do motor de exclusão e teste_reenvio_repetido.
+
+## hc-2026.11.02-2 (02/11/2026 09:33) — Contas a Pagar #7 (SQL 189 antes do restart), hapvida-check sem mudança · reverter: hc-2026.11.02-1
+## hc-2026.11.02-1 (02/11/2026 09:29) — Contas a Pagar #11, #13–#16 (tela + API), hapvida-check sem mudança · reverter: hc-2026.11.01-2
+
 ## hc-2026.11.01-2 (01/11/2026 23:25, autorizado pelo André: onda "esta semana" A4/A6/A12/A13 + Contas a Pagar #5–#10; --forcar-janela por ser dia 1, fila vazia) — hapvida-check fd12a58 + lifetools 1d89a42 · reverter: hc-2026.11.01-1
 - A6: vez única na conta Cora — vigia #154, ciclo_inclusao, pedidos_digitacao (por contrato) e as rotinas da manhã (copart, boletos, documentos, DAVJV) esperam o lock 727003, o mesmo do lifetools. **Desligar (volta a só registrar em portal.uso):** (1) crons — pôr `-e PORTAL_VEZ=observar` no `docker exec` das linhas do vigia, ciclo_inclusao e pedidos_digitacao no crontab (vale na rodada seguinte, sem publicar); (2) rotas da manhã (processo do app) — o docker-compose ainda não repassa a variável: acrescentar `PORTAL_VEZ: ${PORTAL_VEZ:-}` em `environment`, `PORTAL_VEZ=observar` no `.env` e `docker compose up -d --no-build`; ou, para tirar o A6 inteiro, `publicar_hapvida_check.sh --reverter hc-2026.11.01-1` (o lifetools segue com A4/A12/A13).
 - A4: Saúde que vira ATIVA pela reanálise põe o Odonto Premium na fila. A12: transferência retoma de onde parou (não exclui de novo; e-mail de exclusão imediata com chave). A13: tempo limite por rota no hapvida-check; estourou = falha "incerta" que não volta pra fila.
