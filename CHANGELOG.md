@@ -2,6 +2,9 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.03-1 (03/11/2026 10:48, autorizado pelo André; fila vazia, 0 envio em andamento) — hapvida-check sem mudança de código + lifetools f255d25 · reverter: hc-2026.11.02-6
+- Portal de movimentações (MOV-000006): o CPF que o motor troca com a Hapvida confirmando nome e nascimento fica gravado na planilha do chamado. Antes, na análise seguinte, com a vida já ativa, o item voltava ao CPF digitado e a vida ativa nunca chegava ao chamado (l.59). Também: dependente recusado por "plano do titular" ou "dependente sem titular", cujo titular está no chamado, espera o titular e sobe de novo sozinho, em vez de virar correção do cliente (l.10). Sem SQL.
+
 ## hc-2026.11.02-6 (02/11/2026 17:55, feriado, autorizado pelo André; fila vazia) — hapvida-check sem mudança de código + lifetools 9262e13 · reverter: hc-2026.11.02-5
 - NFs, 2ª entrega da sessão Receitas: rotina diária `nf/sync_diario.sh` com vigia, lote Hapvida conferido (pelo arquivo ou pelo valor), abas MedSênior, Bradesco e Nossa Saúde com "Falta fonte", baixa por extrato pronta mas não executada. A API passa a ter 14 operadoras em `receber.py`.
 
