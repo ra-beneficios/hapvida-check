@@ -50,7 +50,8 @@ def conferir_sessao(sessao: dict) -> str:
     if not (re.fullmatch(r"\d{5,12}", p) and re.fullmatch(r"\d{10,30}", s)):
         raise SessaoLegado("a URL não tem pPessoa e pIdSessao")
     r = httpx.get(f"{LEGADO}SistemaMenu?pPessoa={p}&pNoCache={int(time.time() * 1000)}&pIdSessao={s}", timeout=60)
-    m = re.search(r"C[ÓO]DIGO:\s*(?:<[^>]+>\s*)*([0-9A-Z]{5})", r.text)
+    # o menu traz "<li><b>Código: </b>2M2DX</li>" (04/11/2026)
+    m = re.search(r"C[ÓOóo]DIGO:\s*(?:<[^>]+>\s*)*([0-9A-Z]{5})\b", r.text, re.I)
     if r.status_code != 200 or "InclusaoContratoCpf" not in r.text or not m:
         raise SessaoLegado("a sessão do Legado venceu ou não abriu o menu — faça o login de novo e cole a URL")
     return m.group(1)
@@ -179,6 +180,31 @@ def _dependente(page, d: dict, html: Path, alertas: list) -> str:
     return (m.group(1).strip() if m else t[-300:]) + (" | ALERTAS: " + "; ".join(alertas[n:]) if alertas[n:] else "")
 
 
+def _ficha_novo_dependente(page, menu: str, cpf_titular: str) -> bool:
+    """04/11/2026 (S7HNK, MOV-000012): abre o pedido já digitado do titular (Alterar Pedido) e vai para "Novo Dependente".
+    Serve quando o titular já tem pedido ("JÁ EXISTE UM PEDIDO DIGITADO PARA ESTE CPF") e quando, depois de um dependente,
+    a tela não volta para a ficha. -> True se a ficha de dependente abriu."""
+    base = page.url.split("/pls/")[0] + "/pls/webhap/webNewCadastroUsuario."
+    q = menu.split("?", 1)[1] if "?" in menu else ""
+    page.goto(f"{base}AlteracaoContratoCpf?{q}")
+    page.wait_for_load_state("networkidle")
+    page.fill("input[name=pCpfTitular]", cpf_titular)
+    with page.expect_navigation(timeout=30000):
+        page.evaluate("document.forms[0].submit()")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2000)
+    if "AlteracaoContratoFicha" not in page.url:
+        return False
+    with page.expect_navigation(timeout=60000):
+        page.click("input[type=submit][value='Novo Dependente']")
+    page.wait_for_load_state("networkidle")
+    try:
+        page.wait_for_selector("#pCpf", state="visible", timeout=30000)
+        return True
+    except Exception:
+        return False
+
+
 def incluir(cod: str, familias: list[dict], sessao: dict | None = None) -> dict:
     """Formulário do Legado: titular + dependentes, família por família. -> {cpf_titular: {titular, deps: {cpf: msg}}}"""
     from playwright.sync_api import sync_playwright
@@ -198,17 +224,25 @@ def incluir(cod: str, familias: list[dict], sessao: dict | None = None) -> dict:
         try:
             menu = _login(page, cod, sessao)
             for f in familias:
-                if f["cpf"] in res and not res[f["cpf"]]["titular"].startswith("FALHA"):
-                    continue        # já foi: não cadastra de novo
+                ja = (res.get(f["cpf"]) or {}).get("titular") or ""
+                if ja == "OK" or ja.startswith("PENDENTE_DOC"):
+                    continue        # já foi: não cadastra de novo (FALHA/BLOQUEADO tenta de novo — 04/11: "pedido digitado")
                 r = {"titular": _titular(page, menu, f, html), "deps": {}}
+                if "JÁ EXISTE UM PEDIDO DIGITADO" in r["titular"].upper():
+                    # 04/11/2026: o titular já está no Legado (pedido digitado antes): os dependentes entram no pedido dele
+                    r["titular"] = "OK"
+                    r["ja_digitado"] = True
                 if r["titular"] == "OK" or r["titular"].startswith("PENDENTE_DOC"):
                     # 28/10/2026 (UTC SY8MI): o "em validação" também já tem controle (é por ele que o documento entra)
                     r["controle"] = page.evaluate("document.querySelector('input[name=pControle]')?.value")
                 if r["titular"] == "OK":
-                    for d in f["deps"]:
+                    for k, d in enumerate(f["deps"]):
+                        # 04/11/2026: a ficha de dependente nem sempre volta depois de um cadastro (e o pedido já digitado
+                        # começa fora dela): reabre pelo Alterar Pedido > Novo Dependente antes de cada um que precisar
+                        if (r.get("ja_digitado") and k == 0) or not page.query_selector("#pCpf"):
+                            if not _ficha_novo_dependente(page, menu, f["cpf"]):
+                                break   # não abriu: os que faltam ficam sem resposta (voltam como recusados)
                         r["deps"][d["cpf"]] = _dependente(page, d, html, alertas)
-                        if "inclusaodependente" not in page.url.lower():
-                            break   # saiu da ficha de dependente: os outros ficam sem resposta (voltam como recusados)
                 res[f["cpf"]] = r
                 _gravar(arq, res)
         finally:
