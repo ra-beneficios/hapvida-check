@@ -35,7 +35,36 @@ def _gravar(caminho: Path, dados) -> None:
     os.chmod(caminho, 0o600)
 
 
-def _login(page, cod: str) -> str:
+class SessaoLegado(Exception):
+    """Sem sessão válida do Legado para este código (captcha no login do robô ou sessão colada vencida/de outro código)."""
+
+
+LEGADO = "https://www.hapvida.com.br/pls/webhap/webNewCadastroUsuario."
+
+
+def conferir_sessao(sessao: dict) -> str:
+    """04/11/2026 (André: o login da Movimentação tem reCAPTCHA v3 e recusa o robô): sessão que o André abriu e colou na
+    tela. Só leitura: abre o menu e devolve o código da empresa ("CÓDIGO: S7HNK"). SessaoLegado se vencida."""
+    import httpx
+    p, s = str(sessao.get("pPessoa") or ""), str(sessao.get("pIdSessao") or "")
+    if not (re.fullmatch(r"\d{5,12}", p) and re.fullmatch(r"\d{10,30}", s)):
+        raise SessaoLegado("a URL não tem pPessoa e pIdSessao")
+    r = httpx.get(f"{LEGADO}SistemaMenu?pPessoa={p}&pNoCache={int(time.time() * 1000)}&pIdSessao={s}", timeout=60)
+    m = re.search(r"C[ÓO]DIGO:\s*(?:<[^>]+>\s*)*([0-9A-Z]{5})", r.text)
+    if r.status_code != 200 or "InclusaoContratoCpf" not in r.text or not m:
+        raise SessaoLegado("a sessão do Legado venceu ou não abriu o menu — faça o login de novo e cole a URL")
+    return m.group(1)
+
+
+def _login(page, cod: str, sessao: dict | None = None) -> str:
+    if sessao:
+        # 04/11/2026: sessão colada pelo André (o robô não passa no captcha). Confere que é DESTE código
+        if conferir_sessao(sessao) != cod:
+            raise SessaoLegado(f"a sessão colada não é do contrato {cod}")
+        page.goto(f"{LEGADO}SistemaMenu?pPessoa={sessao['pPessoa']}&pNoCache={int(time.time() * 1000)}"
+                  f"&pIdSessao={sessao['pIdSessao']}", timeout=60000)
+        page.wait_for_load_state("networkidle")
+        return page.url
     cred = secrets_store.get_json("hapvida-legado")[cod]
     page.goto(censo_legado.LOGIN_URL, timeout=30000)
     page.wait_for_load_state("networkidle")
@@ -46,6 +75,9 @@ def _login(page, cod: str) -> str:
     page.click("#Prosseguir")
     page.wait_for_url(re.compile("pIdSessao="), timeout=30000)
     page.wait_for_timeout(2000)
+    # 03/11/2026 (legado_captcha_premium): a URL de recusa também tem pIdSessao= — antes "entrava" e quebrava com 500
+    if "CAPTCHA" in page.content().upper() or "InclusaoContratoCpf" not in page.content():
+        raise SessaoLegado(f"o login do Legado ({cod}) recusou o robô (captcha): precisa da sessão colada na tela")
     return page.url
 
 
@@ -55,6 +87,11 @@ def _setv(page, sel, v):
 
 
 def _enviar(page):
+    # 04/11/2026 (S7HNK, CLEISSON 30/10: "020-Obrigatorio informar nu identidade quando informa orgao emissor/uf"):
+    # órgão emissor/UF sem o número do RG -> vão os três em branco
+    page.evaluate("() => { const r = document.querySelector('[name=pRg]'), o = document.querySelector('[name=pOrgao]'),"
+                  " u = document.querySelector('[name=pUfOrgao]'); if (r && !r.value.trim()) { if (o) o.value = '';"
+                  " if (u) u.value = ''; } }")
     with page.expect_navigation(timeout=60000):
         page.click("#btProsseguir")
     page.wait_for_load_state("networkidle")
@@ -142,7 +179,7 @@ def _dependente(page, d: dict, html: Path, alertas: list) -> str:
     return (m.group(1).strip() if m else t[-300:]) + (" | ALERTAS: " + "; ".join(alertas[n:]) if alertas[n:] else "")
 
 
-def incluir(cod: str, familias: list[dict]) -> dict:
+def incluir(cod: str, familias: list[dict], sessao: dict | None = None) -> dict:
     """Formulário do Legado: titular + dependentes, família por família. -> {cpf_titular: {titular, deps: {cpf: msg}}}"""
     from playwright.sync_api import sync_playwright
     pasta = _pasta(cod)
@@ -159,7 +196,7 @@ def incluir(cod: str, familias: list[dict]) -> dict:
         page = b.new_page()
         page.on("dialog", lambda dg: (alertas.append(dg.message), dg.accept()))
         try:
-            menu = _login(page, cod)
+            menu = _login(page, cod, sessao)
             for f in familias:
                 if f["cpf"] in res and not res[f["cpf"]]["titular"].startswith("FALHA"):
                     continue        # já foi: não cadastra de novo
@@ -179,7 +216,7 @@ def incluir(cod: str, familias: list[dict]) -> dict:
     return {f["cpf"]: res.get(f["cpf"]) for f in familias if f["cpf"] in res}
 
 
-def pre_cancelar(cod: str, acoes: list[list]) -> dict:
+def pre_cancelar(cod: str, acoes: list[list], sessao: dict | None = None) -> dict:
     """acoes: [[CANCELA_CONTRATO|CANCELA_DEP, cpf, nome, cpf_titular]]. -> {cpf: 'OK ...' | 'SEM_CODIGO' | 'FALHA: ...'}"""
     from playwright.sync_api import sync_playwright
     pasta = _pasta(cod) / "excl"
@@ -202,7 +239,7 @@ def pre_cancelar(cod: str, acoes: list[list]) -> dict:
         page = b.new_page()
         page.on("dialog", lambda d: d.accept())
         try:
-            _login(page, cod)
+            _login(page, cod, sessao)
             pessoa = re.search(r"pPessoa=(\d+)", page.content()).group(1)
             sess = re.search(r"pIdSessao=([^&\"']+)", page.url).group(1)
             base = page.url.split("/pls/")[0] + "/pls/webhap/webNewCadastroUsuario."

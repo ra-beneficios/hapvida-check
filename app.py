@@ -456,11 +456,28 @@ def ciclo_descartar(p: CicloDescartar):
 class PremiumIncluir(BaseModel):
     codigo: str
     familias: list[dict]
+    sessao: dict | None = None      # 04/11/2026: {pPessoa, pIdSessao} colada pelo André (captcha no login do robô)
 
 
 class PremiumPreCancelar(BaseModel):
     codigo: str
     acoes: list[list]
+    sessao: dict | None = None
+
+
+class SessaoLegadoIn(BaseModel):
+    pPessoa: str
+    pIdSessao: str
+
+
+@app.post("/legado/sessao/conferir")
+def legado_sessao_conferir(p: SessaoLegadoIn):
+    """Só leitura: a sessão do Legado colada na tela está viva? -> {"codigo": "S7HNK"}; 409 se vencida."""
+    import odonto_premium
+    try:
+        return {"codigo": odonto_premium.conferir_sessao(p.model_dump())}
+    except odonto_premium.SessaoLegado as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 def _codigo_legado(codigo: str) -> str:
@@ -478,7 +495,10 @@ def odonto_premium_incluir(p: PremiumIncluir):
     import odonto_premium
     if not p.familias or len(p.familias) > 300:
         raise HTTPException(status_code=400, detail="lista de famílias vazia ou grande demais")
-    return {"resultado": odonto_premium.incluir(_codigo_legado(p.codigo), p.familias)}
+    try:
+        return {"resultado": odonto_premium.incluir(_codigo_legado(p.codigo), p.familias, p.sessao)}
+    except odonto_premium.SessaoLegado as e:      # nada foi enviado: o portal espera a sessão
+        raise HTTPException(status_code=428, detail=str(e))
 
 
 @app.post("/odonto-premium/pre-cancelar")
@@ -488,7 +508,10 @@ def odonto_premium_pre_cancelar(p: PremiumPreCancelar):
     import odonto_premium
     if not p.acoes or len(p.acoes) > 300:
         raise HTTPException(status_code=400, detail="lista de ações vazia ou grande demais")
-    return {"resultado": odonto_premium.pre_cancelar(_codigo_legado(p.codigo), p.acoes)}
+    try:
+        return {"resultado": odonto_premium.pre_cancelar(_codigo_legado(p.codigo), p.acoes, p.sessao)}
+    except odonto_premium.SessaoLegado as e:
+        raise HTTPException(status_code=428, detail=str(e))
 
 
 class EmailCora(BaseModel):

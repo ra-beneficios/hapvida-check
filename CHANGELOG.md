@@ -2,6 +2,23 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.04-4 (04/11/2026, à noite, autorizado pelo André) — hapvida-check (sessão do Legado) + lifetools · reverter: hc-2026.11.04-3
+- Odonto Premium no Legado com a sessão colada pela TI: `/legado/sessao/conferir` (só leitura, devolve o código da empresa). `/odonto-premium/incluir` e `/pre-cancelar` aceitam `sessao`. Login sem sessão que bate no captcha responde 428 com um erro claro (antes dava 500 mudo). Erro 020: órgão emissor sem o número do RG vai em branco.
+- lifetools: tabela `movimentacoes.sessao_legado` (migração 006, 50 min). A fila espera a sessão sem gastar tentativa e mostra o aviso na tela da TI.
+
+## hc-2026.11.04-3 (04/11/2026 19:01, autorizado pelo André) — lifetools 1d0cc86 · reverter: hc-2026.11.04-2
+- Motor "esgota antes de voltar":
+  - vida ativa confirmada ao vivo não volta;
+  - transferência no grupo é pedida sozinha;
+  - CPF inválido ou repetido é resolvido pela base de vidas;
+  - a agência dos Correios é buscada a partir do próprio CEP.
+
+## hc-2026.11.04-2 (04/11/2026 18:15) — lifetools 5d93798 · reverter: hc-2026.11.04-1
+- O nascimento da Receita vale quando o do arquivo é impossível e o nome bate.
+
+## hc-2026.11.04-1 (04/11/2026 18:12, dia de faturamento, --forcar-janela com o André) — lifetools 621f6b3 · reverter: hc-2026.11.03-1
+- Motor 0.4.18: CEP que a rua não decide vai para a agência dos Correios do bairro ou do município, em vez de virar pergunta.
+
 ## hc-2026.11.03-1 (03/11/2026 10:48, autorizado pelo André; fila vazia, 0 envio em andamento) — hapvida-check sem mudança de código + lifetools f255d25 · reverter: hc-2026.11.02-6
 - Portal de movimentações (MOV-000006): o CPF que o motor troca com a Hapvida confirmando nome e nascimento fica gravado na planilha do chamado. Antes, na análise seguinte, com a vida já ativa, o item voltava ao CPF digitado e a vida ativa nunca chegava ao chamado (l.59). Também: dependente recusado por "plano do titular" ou "dependente sem titular", cujo titular está no chamado, espera o titular e sobe de novo sozinho, em vez de virar correção do cliente (l.10). Sem SQL.
 
