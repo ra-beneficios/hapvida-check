@@ -172,6 +172,18 @@ def _dependente(page, d: dict, html: Path, alertas: list) -> str:
                   d["cas"] if d["tipo"] == "1" else "")
     page.evaluate("carregaVigenciaCargoDep(document.getElementById('pDataNasc'))")
     page.wait_for_timeout(2000)
+    # 05/11/2026 (S7HNK, SUELLEN, MOV-000012): na tela "Inclusão de Novos Dependentes" (titular já ativo) o plano vem
+    # num select que o JS carrega depois da data; sem ele o Legado devolve "094-Plano do dependente deve ser informado"
+    if page.query_selector("select[name=pTipoPlano]"):
+        for _ in range(20):
+            opts = page.eval_on_selector_all("select[name=pTipoPlano] option", "os => os.map(o => [o.value, o.text])")
+            if any(v for v, _ in opts):
+                break
+            page.wait_for_timeout(1000)
+        plano = next((v for v, t in opts if v), None)
+        if plano:
+            page.select_option("select[name=pTipoPlano]", plano)
+            page.wait_for_timeout(1500)
     n = len(alertas)
     _enviar(page)
     (html / f"dep_{d['cpf']}.html").write_text(page.content())
