@@ -189,6 +189,11 @@ def _dependente(page, d: dict, html: Path, alertas: list) -> str:
     (html / f"dep_{d['cpf']}.html").write_text(page.content())
     t = _txt(page.content())
     m = re.search(r"\*\s*\*\s*\*([^*]{5,200})\*\s*\*\s*\*", t)
+    # 05/11/2026 (2M2DX, MOV-000014 l.11/113/119): "CADASTRO EM PROCESSO DE VALIDAÇÃO DE DADOS, ANEXAR DOCUMENTAÇÃO..."
+    # vem sem os asteriscos — antes o rodapé da página virava o motivo e a vida aparecia recusada
+    v = re.search(r"CADASTRO EM PROCESSO DE VALIDA[ÇC][ÃA]O[^.]{0,160}", t)
+    if not m and v:
+        return "PENDENTE_DOC " + v.group(0).strip() + (" | ALERTAS: " + "; ".join(alertas[n:]) if alertas[n:] else "")
     return (m.group(1).strip() if m else t[-300:]) + (" | ALERTAS: " + "; ".join(alertas[n:]) if alertas[n:] else "")
 
 
