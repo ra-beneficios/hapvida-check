@@ -2,9 +2,18 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
-## hc-2026.11.04-4 (04/11/2026, à noite, autorizado pelo André) — hapvida-check (sessão do Legado) + lifetools · reverter: hc-2026.11.04-3
-- Odonto Premium no Legado com a sessão colada pela TI: `/legado/sessao/conferir` (só leitura, devolve o código da empresa). `/odonto-premium/incluir` e `/pre-cancelar` aceitam `sessao`. Login sem sessão que bate no captcha responde 428 com um erro claro (antes dava 500 mudo). Erro 020: órgão emissor sem o número do RG vai em branco.
-- lifetools: tabela `movimentacoes.sessao_legado` (migração 006, 50 min). A fila espera a sessão sem gastar tentativa e mostra o aviso na tela da TI.
+## hc-2026.11.05-1 (05/11/2026 09:56, dia de faturamento, --forcar-janela pelo André; fila vazia) — hapvida-check d3fcf5e + lifetools daea48b · reverter: hc-2026.11.04-3
+- Odonto Premium no Legado com a sessão colada pela TI:
+  - `/legado/sessao/conferir` só lê e devolve o código da empresa.
+  - `/odonto-premium/incluir` e `/pre-cancelar` aceitam `sessao`.
+  - O login sem sessão que esbarra no captcha passa a responder 428 com um erro claro (antes era um 500 sem mensagem).
+  - Erro 020: sem o número do RG, o órgão emissor e a UF vão em branco.
+- Pedido já digitado: os dependentes do titular entram pelo Alterar Pedido > Novo Dependente. Ficha que não volta é reaberta. O código é lido do menu "Código:" em minúsculas.
+- lifetools:
+  - Migração 006, tabela `movimentacoes.sessao_legado`, sessão válida por 50 min. A fila espera a sessão sem gastar tentativa e a tela da TI mostra o aviso.
+  - Transferência em que um dependente fica na origem segue confirmada pelo sistema, sem perguntar.
+  - Nome da mãe grudado é separado pelos nomes frequentes da base.
+  - Cônjuge adulto vai como casado. "Cônjuge" criança vira filho só se não houver data de casamento.
 
 ## hc-2026.11.04-3 (04/11/2026 19:01, autorizado pelo André) — lifetools 1d0cc86 · reverter: hc-2026.11.04-2
 - Motor "esgota antes de voltar":
