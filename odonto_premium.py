@@ -82,6 +82,70 @@ def _login(page, cod: str, sessao: dict | None = None) -> str:
     return page.url
 
 
+# 06/11/2026 (André, MOV-000014 l.11 HELLOÁ: "a melhor regra porque não falhamos"): o Premium vai com o cadastro que a
+# Saúde ACEITOU (é o dado que a Hapvida já validou), não com o do layout nem com o que o Legado preenche sozinho pelo CPF.
+# Em 06/11, 75 de 339 vidas do Premium iam com nome/mãe/nascimento/sexo diferentes da Saúde (3 caíram em "validação de
+# documento"). RG/órgão/UF a Saúde não tem: vão em branco (nada que a Hapvida não validou).
+def cadastro_saude(contrato: str, cpfs: set[str]) -> dict[str, dict]:
+    """{cpf: {nome, nasc dd/mm/aaaa, mae, sexo M|F}} do cadastro ATIVO no contrato de Saúde (portal moderno, só leitura).
+    CPF sem cadastro ativo (subiu limpo e ainda não ativou) fica de fora: vai o layout, que é o que a Saúde recebeu."""
+    import sys
+    sys.path.insert(0, os.environ.get("SANEAMENTO_PATH", "/lifetools_service"))
+    from saneamento import coleta_portal
+    out = {}
+    with coleta_portal.sessao(contrato) as (page, headers):
+        for cpf in sorted(cpfs):
+            for c in coleta_portal.certificados_do_cpf(page, headers, contrato, cpf) or []:
+                st = ((c.get("statusDetail") or {}).get("description") or c.get("_status_lista") or "").strip().upper()
+                if st != "ATIVO":
+                    continue
+                nm = c.get("name") if isinstance(c.get("name"), dict) else {"full": c.get("name")}
+                m = re.match(r"(\d{4})-(\d{2})-(\d{2})|(\d{2})/(\d{2})/(\d{4})", (c.get("birthDate") or "").strip())
+                nasc = (f"{m.group(3)}/{m.group(2)}/{m.group(1)}" if m.group(1) else m.group(0)[:10]) if m else ""
+                g = c.get("gender")
+                g = ((g.get("type") if isinstance(g, dict) else g) or "").strip().upper()[:1]
+                out[cpf] = {k: v for k, v in (("nome", (nm.get("full") or "").strip()), ("mae", (nm.get("mom") or "").strip()),
+                                               ("nasc", nasc), ("sexo", g if g in ("M", "F") else "")) if v}
+                break
+    return out
+
+
+def aplicar_cadastro_saude(familias: list[dict], cad: dict[str, dict]) -> list[dict]:
+    """Troca nome, mãe, nascimento e sexo de cada pessoa pelo cadastro ativo da Saúde. Marca quem foi trocado ("_saude")."""
+    for f in familias:
+        for pessoa, campos in [(f, ("nome", "mae", "sexo"))] + [(d, ("nome", "mae", "nasc", "sexo")) for d in f.get("deps") or []]:
+            c = cad.get(pessoa.get("cpf")) or {}
+            mud = {k: c[k] for k in campos if c.get(k) and c[k] != pessoa.get(k)}
+            pessoa.update(mud)
+            pessoa["_saude"] = bool(c)
+            if mud:
+                pessoa["_trocado"] = sorted(mud)
+    return familias
+
+
+def _sem_rg(page):
+    """RG, órgão emissor e UF que o Legado preenche pelo CPF vão em branco (a Saúde não tem; 06/11/2026)."""
+    page.evaluate("() => ['pRg', 'pOrgao', 'pUfOrgao'].forEach(n => document.querySelectorAll('[name=' + n + ']')"
+                  ".forEach(e => { e.removeAttribute('readonly'); e.value = ''; }))")
+
+
+def _ficha(page, html: Path, nome: str):
+    """A ficha como vai (campos preenchidos), guardada antes de enviar: prova do que foi se o Legado pedir documento."""
+    try:
+        v = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('input,select,textarea')]
+            .filter(e => e.name && e.type !== 'hidden' && e.value).map(e => [e.name, e.value]))""")
+        (html / f"ficha_{nome}.json").write_text(json.dumps(v, ensure_ascii=False, indent=1))
+    except Exception:
+        pass
+
+
+def _forca(page, sel, v):
+    """Grava o valor mesmo se o Legado já preencheu (o cadastro da Saúde manda)."""
+    if v:
+        page.evaluate("([s, v]) => { const e = document.querySelector(s); if (e) { e.removeAttribute('readonly'); e.value = v; } }",
+                      [sel, v])
+
+
 def _setv(page, sel, v):
     if v:
         page.evaluate("([s, v]) => { const e = document.querySelector(s); if (!e.value) e.value = v; }", [sel, v])
@@ -114,11 +178,13 @@ def _titular(page, menu: str, f: dict, html: Path) -> str:
         t = _txt(page.content())
         i = t.find("DATA:")
         return "BLOQUEADO: " + (t[i:i + 300] if i >= 0 else t[-300:])
-    _setv(page, "#pNomeTitular", f["nome"][:45])
+    (_forca if f.get("_saude") else _setv)(page, "#pNomeTitular", f["nome"][:45])
     # 017: a Receita abrevia o nome da mãe (ex.: "DULCELY DE B QUEIROZ"); com o nome completo, sobrescreve
     page.evaluate("""m => { const e = document.querySelector('[name=pMae]'); if (!e || !m) return;
         if (!e.value || / [A-Z]\\.? /.test(' ' + e.value + ' ')) { e.removeAttribute('readonly'); e.value = m; } }""",
                   (f.get("mae") or "")[:45])
+    if f.get("_saude"):
+        _forca(page, "[name=pMae]", (f.get("mae") or "")[:45])
     page.select_option("#pSexo", f["sexo"])
     page.select_option("#pEstadoCivil", f["ec"])
     page.click("#pDataAdm2")
@@ -141,6 +207,8 @@ def _titular(page, menu: str, f: dict, html: Path) -> str:
         if (m && u && !u.value) u.value = m[1]; }""")
     page.evaluate("() => { const o = document.querySelector('[name=pOrgao]'), u = document.querySelector('[name=pUfOrgao]'); "
                   "if (!o || !o.value || !u || !u.value) { document.querySelector('[name=pRg]').value = ''; o.value = ''; u.value = ''; } }")
+    _sem_rg(page)
+    _ficha(page, html, f"tit_{f['cpf']}")
     _enviar(page)
     (html / f"tit_{f['cpf']}.html").write_text(page.content())
     t = _txt(page.content())
@@ -161,9 +229,10 @@ def _dependente(page, d: dict, html: Path, alertas: list) -> str:
     page.keyboard.type(d["cpf"])
     page.keyboard.press("Tab")
     page.wait_for_timeout(3500)
-    _setv(page, "#pNomeDep", d["nome"][:45])
-    _setv(page, "#pDataNasc", d["nasc"])
-    _setv(page, "#pMae", d["mae"][:45])
+    preenche = _forca if d.get("_saude") else _setv
+    preenche(page, "#pNomeDep", d["nome"][:45])
+    preenche(page, "#pDataNasc", d["nasc"])
+    preenche(page, "#pMae", d["mae"][:45])
     page.select_option("#pEstadoCivil", d["ec"])
     page.select_option("#pTipoDep", d["tipo"])
     page.select_option("#pSexo", d["sexo"])
@@ -185,6 +254,8 @@ def _dependente(page, d: dict, html: Path, alertas: list) -> str:
             page.select_option("select[name=pTipoPlano]", plano)
             page.wait_for_timeout(1500)
     n = len(alertas)
+    _sem_rg(page)
+    _ficha(page, html, f"dep_{d['cpf']}")
     _enviar(page)
     (html / f"dep_{d['cpf']}.html").write_text(page.content())
     t = _txt(page.content())
@@ -222,9 +293,20 @@ def _ficha_novo_dependente(page, menu: str, cpf_titular: str) -> bool:
         return False
 
 
-def incluir(cod: str, familias: list[dict], sessao: dict | None = None) -> dict:
-    """Formulário do Legado: titular + dependentes, família por família. -> {cpf_titular: {titular, deps: {cpf: msg}}}"""
+def incluir(cod: str, familias: list[dict], sessao: dict | None = None, saude: str | None = None) -> dict:
+    """Formulário do Legado: titular + dependentes, família por família. -> {cpf_titular: {titular, deps: {cpf: msg}}}
+    saude: código do contrato de Saúde — nome/mãe/nascimento/sexo vêm do cadastro ativo lá (06/11/2026)."""
     from playwright.sync_api import sync_playwright
+    if saude:
+        cpfs = {f["cpf"] for f in familias} | {d["cpf"] for f in familias for d in f.get("deps") or []}
+        try:
+            cad = cadastro_saude(saude, cpfs)
+        except Exception as e:      # sem a consulta, vai o layout (o que a Saúde recebeu limpo) — como era até 05/11
+            print(f"[odonto_premium] {cod}: cadastro da Saúde {saude} indisponível ({type(e).__name__}: {e}); vai o layout")
+            cad = {}
+        aplicar_cadastro_saude(familias, cad)
+        trocas = [(x["cpf"], x["_trocado"]) for f in familias for x in [f] + (f.get("deps") or []) if x.get("_trocado")]
+        print(f"[odonto_premium] {cod}: {len(cad)} de {len(cpfs)} com cadastro ativo na Saúde {saude}; trocados: {trocas}")
     pasta = _pasta(cod)
     html = pasta / "html"
     html.mkdir(exist_ok=True)

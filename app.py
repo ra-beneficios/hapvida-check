@@ -457,6 +457,7 @@ class PremiumIncluir(BaseModel):
     codigo: str
     familias: list[dict]
     sessao: dict | None = None      # 04/11/2026: {pPessoa, pIdSessao} colada pelo André (captcha no login do robô)
+    saude: str | None = None        # 06/11/2026: contrato de Saúde — o Premium vai com o cadastro ativo lá
 
 
 class PremiumPreCancelar(BaseModel):
@@ -496,7 +497,8 @@ def odonto_premium_incluir(p: PremiumIncluir):
     if not p.familias or len(p.familias) > 300:
         raise HTTPException(status_code=400, detail="lista de famílias vazia ou grande demais")
     try:
-        return {"resultado": odonto_premium.incluir(_codigo_legado(p.codigo), p.familias, p.sessao)}
+        return {"resultado": odonto_premium.incluir(_codigo_legado(p.codigo), p.familias, p.sessao,
+                                                    (p.saude or "").strip().upper() or None)}
     except odonto_premium.SessaoLegado as e:      # nada foi enviado: o portal espera a sessão
         raise HTTPException(status_code=428, detail=str(e))
 
