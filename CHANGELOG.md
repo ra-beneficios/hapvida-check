@@ -2,6 +2,10 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.06-3 (06/11/2026 14:08, --forcar-janela pelo André; fila vazia) — hapvida-check 6fd79d0 + lifetools 0e3e7f6 · reverter: hc-2026.11.06-2
+- Motor: transferência com cancelamento já marcado na origem vai com a vigência = data do cancelamento (sem pergunta; MOV-000014 l.100/101, MOV-000015 l.95/96).
+- Motor: com o ViaCEP fora do ar, a agência dos Correios (faixas XXXXX-97X do CEP, do distrito e da cidade) é achada direto na Hapvida — CEP não vira pergunta.
+
 ## hc-2026.11.06-2 (06/11/2026 10:57, --forcar-janela pelo André; fila vazia) — hapvida-check 46f6f91 + lifetools 764b09b · reverter: hc-2026.11.06-1
 - Odonto Premium com o cadastro ATIVO da Saúde (André): nome, mãe, nascimento e sexo vêm de lá e sobrescrevem o que o Legado preenche pelo CPF; RG/órgão/UF em branco; a ficha é guardada antes de enviar (`html/ficha_*.json`). Quem ainda não ativou na Saúde vai com o layout. Em 06/11, 75 de 339 vidas do Premium iam diferentes da Saúde (MOV-000014 l.11 HELLOÁ).
 - lifetools bcc61ea: life-data/certificado/CEP da Hapvida que estoura o tempo num CPF não derruba mais a consulta ao vivo (2ª tentativa; só esse CPF fica sem consulta).
