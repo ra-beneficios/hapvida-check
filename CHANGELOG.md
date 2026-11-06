@@ -2,6 +2,17 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.06-1 (06/11/2026 09:25, --forcar-janela pelo André; fila vazia) — hapvida-check b8940e9 + lifetools 8f1e79b · reverter: hc-2026.11.05-1
+- Odonto Premium:
+  - Na tela Novos Dependentes, o plano carregado pelo JS é escolhido (erro 094).
+  - Dependente "em processo de validação" vira pendência de documento, não recusa.
+- lifetools (motor):
+  - ViaCEP fora do ar não derruba mais a consulta ao vivo (só deixa de sugerir CEP).
+  - CPF digitado errado é aceito pela Receita com nome cortado ou parecido e nascimento igual, com nome e mãe parecidos, ou com nome idêntico e nascimento a até 31 dias. Nome cortado da Receita não substitui o completo.
+  - Cônjuge com nascimento de criança pergunta o nascimento; casamento certo não vira provisório.
+  - O vigia não acusa nome trocado só por grafia; "D OLIVEIRA" vai junto ao sobrenome; nascimento no futuro é substituído pelo da Receita.
+  - Arquivo repetido mostra o motivo na vida e avisa a TI; "Nada a fazer" da Hapvida misturado com crítica real não vira pendência.
+
 ## hc-2026.11.05-1 (05/11/2026 09:56, dia de faturamento, --forcar-janela pelo André; fila vazia) — hapvida-check d3fcf5e + lifetools daea48b · reverter: hc-2026.11.04-3
 - Odonto Premium no Legado com a sessão colada pela TI:
   - `/legado/sessao/conferir` só lê e devolve o código da empresa.
