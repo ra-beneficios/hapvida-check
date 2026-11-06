@@ -2,6 +2,10 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.06-2 (06/11/2026 10:57, --forcar-janela pelo André; fila vazia) — hapvida-check 46f6f91 + lifetools 764b09b · reverter: hc-2026.11.06-1
+- Odonto Premium com o cadastro ATIVO da Saúde (André): nome, mãe, nascimento e sexo vêm de lá e sobrescrevem o que o Legado preenche pelo CPF; RG/órgão/UF em branco; a ficha é guardada antes de enviar (`html/ficha_*.json`). Quem ainda não ativou na Saúde vai com o layout. Em 06/11, 75 de 339 vidas do Premium iam diferentes da Saúde (MOV-000014 l.11 HELLOÁ).
+- lifetools bcc61ea: life-data/certificado/CEP da Hapvida que estoura o tempo num CPF não derruba mais a consulta ao vivo (2ª tentativa; só esse CPF fica sem consulta).
+
 ## hc-2026.11.06-1 (06/11/2026 09:25, --forcar-janela pelo André; fila vazia) — hapvida-check b8940e9 + lifetools 8f1e79b · reverter: hc-2026.11.05-1
 - Odonto Premium:
   - Na tela Novos Dependentes, o plano carregado pelo JS é escolhido (erro 094).
