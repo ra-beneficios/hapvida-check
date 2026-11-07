@@ -2,6 +2,14 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.07-1 (07/11/2026 19:06, sábado, fila vazia) — hapvida-check b11d990 + lifetools 45c306a · reverter: hc-2026.11.06-3
+- Portal MOV, vida "Na operadora" acompanhada pelo robô (MOV-000004: a pendência 710 "eSocial ou CTPS digital" do Almir, pedido 68953885, ficou 8 dias sem ser vista):
+  - `/mov/situacao-pedidos` (só leitura): status, pendência, observação, críticas e documentos do pedido. Conferência 1x/dia; fica na vida e no histórico só quando muda.
+  - Pendência da Hapvida vira documento pedido no chamado ("Aguardando você").
+  - O anexo do chamado é entregue sozinho: no espaço que a Hapvida abriu no pedido (`/mov/anexar-documento`: upload e confirmação com a descrição exata) ou, sem espaço, por e-mail da cora@ com o arquivo (`/email/cora` aceita anexos).
+  - Cobrança por e-mail após 3 dias úteis parado do lado da Hapvida.
+  - API/tela do lifetools: publicar com `publicar_portal_mov.sh`.
+
 ## hc-2026.11.06-3 (06/11/2026 14:08, --forcar-janela pelo André; fila vazia) — hapvida-check 6fd79d0 + lifetools 0e3e7f6 · reverter: hc-2026.11.06-2
 - Motor: transferência com cancelamento já marcado na origem vai com a vigência = data do cancelamento (sem pergunta; MOV-000014 l.100/101, MOV-000015 l.95/96).
 - Motor: com o ViaCEP fora do ar, a agência dos Correios (faixas XXXXX-97X do CEP, do distrito e da cidade) é achada direto na Hapvida — CEP não vira pergunta.
