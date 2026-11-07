@@ -520,6 +520,8 @@ class EmailCora(BaseModel):
     para: list[str]
     assunto: str
     html: str
+    # 07/11/2026 (MOV-000004): documento que a Hapvida pede sem espaço no portal (ex.: vínculo eSocial/CTPS) vai anexado
+    anexos: list[dict] = []        # [{"nome", "mime", "conteudo_b64"}], até 3 MB no total (limite do sendMail simples)
 
 
 # Portal de Movimentações (28/10/2026, decisão 5 do André): interno/operadora sai da cora@. Só aqui há Mail.Send
@@ -538,8 +540,13 @@ def email_cora(p: EmailCora):
     if not p.assunto.strip() or len(p.assunto) > 250:
         raise HTTPException(status_code=400, detail="assunto vazio ou grande demais")
     token = enviar_documentos._get_graph_token(enviar_documentos._get_graph_credenciais(os.environ.get("GCP_PROJECT", "")))
+    if sum(len(a.get("conteudo_b64") or "") for a in p.anexos) * 3 // 4 > 3 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="anexos acima de 3 MB")
     msg = {"message": {"subject": p.assunto, "body": {"contentType": "HTML", "content": p.html},
-                       "toRecipients": [{"emailAddress": {"address": e}} for e in para]},
+                       "toRecipients": [{"emailAddress": {"address": e}} for e in para],
+                       **({"attachments": [{"@odata.type": "#microsoft.graph.fileAttachment", "name": a["nome"],
+                                            "contentType": a.get("mime") or "application/octet-stream",
+                                            "contentBytes": a["conteudo_b64"]} for a in p.anexos]} if p.anexos else {})},
            "saveToSentItems": True}
     r = _httpx.post(f"https://graph.microsoft.com/v1.0/users/{EMAIL_CORA}/sendMail",
                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -547,6 +554,45 @@ def email_cora(p: EmailCora):
     if r.status_code >= 300:
         raise HTTPException(status_code=502, detail=f"Graph {r.status_code}: {r.text[:300]}")
     return {"ok": True, "de": EMAIL_CORA, "para": para}
+
+
+class SituacaoPedidos(BaseModel):
+    contrato: str
+    cpfs: list[str]
+
+
+@app.post("/mov/situacao-pedidos")
+def mov_situacao_pedidos(p: SituacaoPedidos):
+    """07/11/2026 (MOV-000004): só leitura — status, pendência, observação, críticas e documentos do pedido de inclusão
+    de cada CPF. Quem chama segura a vez no portal (lifetools movimentacoes.operadora)."""
+    import pedidos_situacao
+    if not p.cpfs or len(p.cpfs) > 300:
+        raise HTTPException(status_code=400, detail="de 1 a 300 CPFs")
+    try:
+        return {"contrato": p.contrato, "vidas": pedidos_situacao.situacao(p.contrato, p.cpfs)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
+class AnexarDocumento(BaseModel):
+    contrato: str
+    pedido: str
+    cpf: str
+    tipo: str
+    nome: str
+    mime: str
+    conteudo_b64: str
+
+
+@app.post("/mov/anexar-documento")
+def mov_anexar_documento(p: AnexarDocumento):
+    """07/11/2026 (item 4 do André): documento anexado no chamado sobe no espaço que a Hapvida abriu no pedido e é
+    confirmado. Quem chama segura a vez no portal."""
+    import pedidos_situacao
+    try:
+        return pedidos_situacao.anexar(p.contrato, p.pedido, p.cpf, p.tipo, p.nome, p.mime, base64.b64decode(p.conteudo_b64))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
 class ConsultarCpfs(BaseModel):
