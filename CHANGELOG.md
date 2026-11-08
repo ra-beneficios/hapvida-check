@@ -2,6 +2,14 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.07-3 (07/11/2026 noite, sábado) — hapvida-check d68cb08 + lifetools 65eef82 · reverter: hc-2026.11.07-2
+- Odonto Premium conferido no Legado todo dia pelo robô (`/mov/legado-situacao`, só leitura). O login sem sessão passa; o captcha só barra o formulário de inclusão. Lê Status Movimentação e Usuários Ativos.
+  - Vida ativa: a trilha vira ATIVA e sai o pedido de documento. Em 07/11, Julia l.113 e Ana Elisa l.119 do MOV-000014 já estavam ativas e o chamado ainda pedia documento.
+  - Pendência (ex.: status 17 "346-DIVERGENCIAS DE DADOS CADASTRAIS - OBRIGATORIO COMPROVACAO") vira pedido de documento com o texto da Hapvida.
+- O documento do Premium anexado no chamado vai por e-mail da cora@. Antes, a TI recebia aviso para anexar à mão; o Legado não tem onde anexar depois do cadastro.
+- MOV-000004: eSocial do Almir entregue por e-mail em 07/11 21h00 (estava em projeto_ra desde 30/10). Magnolia sem pedido na Hapvida: documentos pedidos no chamado, para entrar como dependente no pedido 68953885 do titular (o documento fica no chamado, não vai por e-mail).
+- Motor: "CPF inválido" diz o porquê (o dígito verificador não confere), em vez de só pedir o CPF (MOV-000017 l.22).
+
 ## hc-2026.11.07-1 (07/11/2026 19:06, sábado, fila vazia) — hapvida-check b11d990 + lifetools 45c306a · reverter: hc-2026.11.06-3
 - Portal MOV, vida "Na operadora" acompanhada pelo robô (MOV-000004: a pendência 710 "eSocial ou CTPS digital" do Almir, pedido 68953885, ficou 8 dias sem ser vista):
   - `/mov/situacao-pedidos` (só leitura): status, pendência, observação, críticas e documentos do pedido. Conferência 1x/dia; fica na vida e no histórico só quando muda.
