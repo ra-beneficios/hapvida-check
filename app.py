@@ -574,6 +574,23 @@ def mov_situacao_pedidos(p: SituacaoPedidos):
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
+class LegadoSituacao(BaseModel):
+    codigo: str
+
+
+@app.post("/mov/legado-situacao")
+def mov_legado_situacao(p: LegadoSituacao):
+    """07/11/2026: só leitura no Legado (Status Movimentação + Usuários Ativos) do contrato Odonto Premium."""
+    import odonto_premium
+    import pedidos_situacao
+    try:
+        return pedidos_situacao.legado_situacao(_codigo_legado(p.codigo))
+    except odonto_premium.SessaoLegado as e:
+        raise HTTPException(status_code=428, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 class AnexarDocumento(BaseModel):
     contrato: str
     pedido: str

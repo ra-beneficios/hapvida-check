@@ -139,3 +139,41 @@ def anexar(contrato: str, pedido: str, cpf: str, tipo: str, nome: str, mime: str
         return {"ok": False, "anexado": True, "faltam": faltam,
                 "erro": f"anexou, mas a confirmação respondeu {conf.status_code}: {conf.text[:200]}"}
     return {"ok": True, "faltam": faltam, "arquivo": arq}
+
+
+# ── Odonto Premium no Legado (07/11/2026, André: "valida se ainda tem captcha") ─────────────────────────
+# O login do robô no Legado passa (o captcha só barra o formulário de inclusão). Só leitura: "Status Movimentação"
+# (pedidos do mês corrente e do anterior: status 0 digitado, 1 pendente de documentação, 2 cancelado, 8 autorizado,
+# 9 processado, 17 em validação de dados — com a PENDÊNCIA) e "Lista Usuários Ativos" (CPF de quem já está ativo).
+def _texto(html: str) -> str:
+    import html as H
+    t = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+    return re.sub(r"\s+", " ", H.unescape(re.sub(r"<[^>]+>", " ", t)))
+
+
+def legado_situacao(cod: str) -> dict:
+    """-> {"ativos": [cpf], "pedidos": [{nome, cpf, status, pendencia, digitado}]}. SessaoLegado se o login recusar."""
+    import odonto_premium
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True)
+        try:
+            menu = odonto_premium._login(b.new_page(), cod)
+        finally:
+            b.close()
+    # as telas são HTML simples com a sessão na URL: httpx é rápido (a lista de usuários tem ~1,7 MB e o "networkidle"
+    # do navegador não termina)
+    telas = {}
+    for tela in ("Status", "Usuario"):
+        r = httpx.get(menu.replace("SistemaMenu", tela), timeout=180)
+        r.raise_for_status()
+        telas[tela] = r.content.decode("latin-1")
+    ativos = sorted({re.sub(r"\D", "", c) for c in re.findall(r"\d{3}\.\d{3}\.\d{3}-\d{2}", telas["Usuario"])})
+    pedidos = []
+    tx = _texto(telas["Status"])
+    for m in re.finditer(r"NOME:\s*(.+?)\s+CPF:\s*(\d+)\s+DT\. NASC:.*?DT\. DIG:\s*(\d{2}/\d{2}/\d{4})\s+STATUS:\s*(\d+)"
+                         r"(.*?)(?=NOME:|$)", tx):
+        pend = re.search(r"PEND[ÊE]NCIA:\s*(.+?)(?:\s+NOME:|$)", m.group(5))
+        pedidos.append({"nome": m.group(1).strip(), "cpf": m.group(2).zfill(11), "digitado": m.group(3),
+                        "status": m.group(4), "pendencia": pend.group(1).strip() if pend else None})
+    return {"ativos": ativos, "pedidos": pedidos}
