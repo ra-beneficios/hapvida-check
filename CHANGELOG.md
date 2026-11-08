@@ -2,6 +2,26 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.08-4 (08/11/2026 tarde) — auditoria MOV, rodada 2 · reverter: hc-2026.11.08-3
+- **Odonto Premium, pendência 346 (André: "remova nome da mãe, data de nascimento e aplique o CPF de novo"):**
+  - a ficha do dependente é limpa antes de digitar o CPF (antes guardava o dependente anterior);
+  - mãe e nascimento que o Legado preenche pela base certificada (Neoway) ficam, sem o cadastro da Saúde por cima. O nosso dado só entra no campo vazio ou na mãe abreviada (017). Teste: tests/teste_premium_neoway_346.py.
+- **Portal (lifetools):**
+  - envio que falhou com erro definitivo (500) e sem registro no portal é repetido sozinho, até 3x; a falha incerta continua sem repetir (decisão 01/11, A1);
+  - o aviso à TI diz quem, se chegou e o que fazer;
+  - a falha antiga some quando um envio seguinte dá certo;
+  - o município pelo CEP no conversor usa o espelho do ViaCEP.
+
+## hc-2026.11.08-3 (08/11/2026 12:26) — lifetools 7fe9f30 · reverter: hc-2026.11.08-2
+- Republicada junto com o portal MOV (publicar_portal_mov.sh): sem mudança de motor em relação à -2.
+
+## hc-2026.11.08-2 (08/11/2026 12:24) — lifetools 7fe9f30 · reverter: hc-2026.11.08-1
+- **Motor 0.4.20 (auditoria MOV):**
+  - CEP nunca é pergunta, mesmo sem o ViaCEP, que recusa o IP do servidor na AWS: agência dos Correios pela tabela própria por município, mais o espelho opencep (Ivan, MOV-16: Magé 25900-970);
+  - o life-data com "pedido DIGITADO" também é consultado por outro contrato (Talita, MOV-18);
+  - CPF digitado: mãe idêntica, mesmo primeiro nome e nascimento até 31 dias = a mesma pessoa (Guisila, MOV-17).
+- **Portal:** a família volta ao Premium quando a exclusão do titular vale (Wellington, MOV-6); o dependente de titular ativo fica ESPERANDO, com aviso diário à TI.
+
 ## hc-2026.11.07-4 (07–08/11/2026 noite) — lifetools 6297aae · reverter: hc-2026.11.07-3
 - Auditoria regra × código:
   - **Motor 0.4.19:** com pedido pendente no contrato, o life-data respondia 400 "Existe um pedido pendente" e a Receita sumia no retorno da crítica ("sem fonte pra corrigir"). Agora a consulta vai por outro contrato da conta e a sessão volta ao contrato original (MOV-000013 l.29/42).

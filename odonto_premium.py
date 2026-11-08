@@ -151,6 +151,18 @@ def _setv(page, sel, v):
         page.evaluate("([s, v]) => { const e = document.querySelector(s); if (!e.value) e.value = v; }", [sel, v])
 
 
+def _limpar(page, seletores):
+    page.evaluate("ss => ss.forEach(s => { const e = document.querySelector(s); if (e) { e.removeAttribute('readonly');"
+                  " e.value = ''; } })", list(seletores))
+
+
+def _mae_completa(page, sel, mae):
+    """Mãe: fica a do Legado (base certificada pelo CPF); a nossa só entra se o campo estiver vazio ou abreviado (017)."""
+    page.evaluate("""([s, m]) => { const e = document.querySelector(s); if (!e || !m) return;
+        if (!e.value || / [A-Z]\\.? /.test(' ' + e.value + ' ')) { e.removeAttribute('readonly'); e.value = m; } }""",
+                  [sel, mae])
+
+
 def _espera_neoway(page, acao) -> dict | None:
     """08/11/2026 (auditoria, MOV-000014 l.11 HELLOÁ): ao sair do CPF o Legado consulta a base dele
     (AjaxRetornaDadosCpfNeoway) e PREENCHE nome/nascimento/mãe — é por isso que o manual não trava. O robô esperava 3,5 s
@@ -200,12 +212,10 @@ def _titular(page, menu: str, f: dict, html: Path) -> str:
     except Exception:
         pass
     (_forca if f.get("_saude") else _setv)(page, "#pNomeTitular", f["nome"][:45])
-    # 017: a Receita abrevia o nome da mãe (ex.: "DULCELY DE B QUEIROZ"); com o nome completo, sobrescreve
-    page.evaluate("""m => { const e = document.querySelector('[name=pMae]'); if (!e || !m) return;
-        if (!e.value || / [A-Z]\\.? /.test(' ' + e.value + ' ')) { e.removeAttribute('readonly'); e.value = m; } }""",
-                  (f.get("mae") or "")[:45])
-    if f.get("_saude"):
-        _forca(page, "[name=pMae]", (f.get("mae") or "")[:45])
+    # 017: a Receita abrevia o nome da mãe (ex.: "DULCELY DE B QUEIROZ"); com o nome completo, sobrescreve.
+    # 08/11/2026 (André, 346): fora isso a mãe que o Legado preencheu pelo CPF FICA (antes o cadastro da Saúde
+    # sobrescrevia e a divergência com a base certificada virava 346)
+    _mae_completa(page, "[name=pMae]", (f.get("mae") or "")[:45])
     page.select_option("#pSexo", f["sexo"])
     page.select_option("#pEstadoCivil", f["ec"])
     page.click("#pDataAdm2")
@@ -246,13 +256,17 @@ def _titular(page, menu: str, f: dict, html: Path) -> str:
 def _dependente(page, d: dict, html: Path, alertas: list) -> str:
     if d["tipo"].startswith("?"):
         return "PULADO: parentesco " + d["tipo"]
+    # 08/11/2026 (André, pendência 346 "divergências de dados cadastrais" no Premium: Helloá, Maria de Lourdes, Samuel,
+    # Edson): "remova nome da mãe, data de nascimento e aplique o CPF de novo". A ficha guardava o dependente anterior e
+    # o robô escrevia por cima do que o Legado preenche pela base certificada dele (Neoway). Agora: limpa, digita o CPF,
+    # e mãe/nascimento que o Legado trouxer FICAM; o nosso dado só entra no campo que ficar vazio (ou mãe abreviada).
+    _limpar(page, ("#pNomeDep", "#pDataNasc", "#pMae"))
     page.click("#pCpf")
     page.keyboard.type(d["cpf"])
     _espera_neoway(page, lambda: page.keyboard.press("Tab"))
-    preenche = _forca if d.get("_saude") else _setv
-    preenche(page, "#pNomeDep", d["nome"][:45])
-    preenche(page, "#pDataNasc", d["nasc"])
-    preenche(page, "#pMae", d["mae"][:45])
+    (_forca if d.get("_saude") else _setv)(page, "#pNomeDep", d["nome"][:45])
+    _setv(page, "#pDataNasc", d["nasc"])
+    _mae_completa(page, "#pMae", d["mae"][:45])
     page.select_option("#pEstadoCivil", d["ec"])
     page.select_option("#pTipoDep", d["tipo"])
     page.select_option("#pSexo", d["sexo"])
