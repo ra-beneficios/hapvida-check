@@ -151,6 +151,23 @@ def _setv(page, sel, v):
         page.evaluate("([s, v]) => { const e = document.querySelector(s); if (!e.value) e.value = v; }", [sel, v])
 
 
+def _espera_neoway(page, acao) -> dict | None:
+    """08/11/2026 (auditoria, MOV-000014 l.11 HELLOÁ): ao sair do CPF o Legado consulta a base dele
+    (AjaxRetornaDadosCpfNeoway) e PREENCHE nome/nascimento/mãe — é por isso que o manual não trava. O robô esperava 3,5 s
+    fixos: com a consulta lenta o campo ainda estava vazio, o robô gravava o dado do layout (Helloá 05/09/2017; a Hapvida
+    tem 05/09/2014) e o Legado devolvia "346-divergências de dados cadastrais". Agora espera a resposta (até 20 s) e o
+    preenchimento antes de seguir; o que o Legado preencheu fica (só o cadastro ATIVO da Saúde sobrescreve, regra 06/11)."""
+    try:
+        with page.expect_response(lambda r: "AjaxRetornaDadosCpfNeoway" in r.url, timeout=20000) as resp:
+            acao()
+        dados = (resp.value.json() or {}).get("cpf") or []
+        page.wait_for_timeout(800)          # o JS do Legado grava os campos depois da resposta
+        return dados[0] if dados else None
+    except Exception:
+        page.wait_for_timeout(3500)         # sem a consulta (CPF sem cadastro, tela antiga): como era
+        return None
+
+
 def _enviar(page):
     # 04/11/2026 (S7HNK, CLEISSON 30/10: "020-Obrigatorio informar nu identidade quando informa orgao emissor/uf"):
     # órgão emissor/UF sem o número do RG -> vão os três em branco
@@ -178,6 +195,10 @@ def _titular(page, menu: str, f: dict, html: Path) -> str:
         t = _txt(page.content())
         i = t.find("DATA:")
         return "BLOQUEADO: " + (t[i:i + 300] if i >= 0 else t[-300:])
+    try:    # 08/11/2026: a ficha do titular também se preenche pela base da Hapvida — espera (ver _espera_neoway)
+        page.wait_for_function("() => (document.querySelector('#pNomeTitular') || {}).value", timeout=15000)
+    except Exception:
+        pass
     (_forca if f.get("_saude") else _setv)(page, "#pNomeTitular", f["nome"][:45])
     # 017: a Receita abrevia o nome da mãe (ex.: "DULCELY DE B QUEIROZ"); com o nome completo, sobrescreve
     page.evaluate("""m => { const e = document.querySelector('[name=pMae]'); if (!e || !m) return;
@@ -227,8 +248,7 @@ def _dependente(page, d: dict, html: Path, alertas: list) -> str:
         return "PULADO: parentesco " + d["tipo"]
     page.click("#pCpf")
     page.keyboard.type(d["cpf"])
-    page.keyboard.press("Tab")
-    page.wait_for_timeout(3500)
+    _espera_neoway(page, lambda: page.keyboard.press("Tab"))
     preenche = _forca if d.get("_saude") else _setv
     preenche(page, "#pNomeDep", d["nome"][:45])
     preenche(page, "#pDataNasc", d["nasc"])

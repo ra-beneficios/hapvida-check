@@ -2,12 +2,13 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
-## hc-2026.11.07-4 (07/11/2026 noite, sábado) — lifetools 6297aae · reverter: hc-2026.11.07-3
+## hc-2026.11.07-4 (07–08/11/2026 noite) — lifetools 6297aae · reverter: hc-2026.11.07-3
 - Auditoria regra × código:
   - **Motor 0.4.19:** com pedido pendente no contrato, o life-data respondia 400 "Existe um pedido pendente" e a Receita sumia no retorno da crítica ("sem fonte pra corrigir"). Agora a consulta vai por outro contrato da conta e a sessão volta ao contrato original (MOV-000013 l.29/42).
   - **Portal:** a regra "linha que não voltou sobe de novo" (0.4.6) passa a valer, com 1 reenvio por vida. Eram 14 vidas dos MOV-15/16 sem pedido, sem crítica e fora da base.
   - **Cobrança:** arquivo que a Hapvida não processa entra na cobrança.
   - **Base de vidas:** todo dia às 05h30. Às 02h o Legado recusava os 18 contratos desde 02/11.
+  - **Odonto Premium:** o robô espera o Legado preencher nome, nascimento e mãe pela base da Hapvida (AjaxRetornaDadosCpfNeoway) antes de digitar, como o manual. Antes, com 3,5 s fixos e a consulta lenta, ia o dado do layout (Helloá 2017; a Hapvida tem 2014), e o resultado era a pendência 346.
 
 ## hc-2026.11.07-3 (07/11/2026 noite, sábado) — hapvida-check d68cb08 + lifetools 65eef82 · reverter: hc-2026.11.07-2
 - Odonto Premium conferido no Legado todo dia pelo robô (`/mov/legado-situacao`, só leitura). O login sem sessão passa; o captcha só barra o formulário de inclusão. Lê Status Movimentação e Usuários Ativos.
