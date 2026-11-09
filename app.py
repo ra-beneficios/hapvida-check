@@ -634,6 +634,27 @@ def mov_anexar_documento(p: AnexarDocumento):
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
+class CancelarPedido(BaseModel):
+    contrato: str
+    cpf: str
+    pedido: str | None = None
+    pode_cancelar: list[str] = []      # CPFs que podem cair junto (titular leva os dependentes do mesmo pedido)
+    executar: bool = False
+
+
+@app.post("/mov/cancelar-pedido")
+def mov_cancelar_pedido(p: CancelarPedido):
+    """09/11/2026 (André: "e por que você não cancela?"): cancela o pedido de inclusão da vida que não vai entrar, como
+    o "Cancelar Pedido" da tela. Quem chama segura a vez no portal."""
+    import pedido_cancelar
+    try:
+        r = pedido_cancelar.cancelar(p.contrato.strip().upper(), p.cpf, p.pedido, p.pode_cancelar, p.executar)
+        r.pop("corpo", None) if p.executar else None
+        return r
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 class CorrigirNascimento(BaseModel):
     contrato: str
     pedido: str
