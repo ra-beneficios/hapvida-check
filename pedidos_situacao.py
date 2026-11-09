@@ -132,33 +132,48 @@ def _sem_acento(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9._ -]", "_", s).strip() or "documento"
 
 
+def _anexos(docs: list[dict]) -> list[dict]:
+    """Os anexos já feitos de uma vida, como a tela manda na confirmação (q_ do main.229a5ef7.js)."""
+    return [{"documentType": x["description"], "fileName": x["fileName"], "name": x.get("name") or "",
+             "path": x.get("path") or "", "type": x.get("type") or ""}
+            for x in docs or [] if (x.get("fileName") or "").strip()]
+
+
+def confirmacao(requeridos: list[dict], pedido: str) -> dict:
+    """O corpo do POST required-documents: titular e dependentes, cada um com TODOS os anexos dele."""
+    tit = next((r for r in requeridos if str(r.get("type") or "").lower() in ("titular", "holder")), None)
+    deps = [r for r in requeridos if r is not tit]
+    return {"holder": {"controlCode": int((tit or {}).get("controlNumber") or pedido), "attachments": _anexos((tit or {}).get("documents"))},
+            "dependents": [{"controlCode": d.get("controlNumber"), "attachments": _anexos(d.get("documents"))} for d in deps]}
+
+
 def anexar(contrato: str, pedido: str, cpf: str, tipo: str, nome: str, mime: str, conteudo: bytes) -> dict:
-    """Sobe o arquivo no espaço `tipo` do pedido (titular) e confirma todos os documentos do pedido.
-    -> {"ok": bool, "faltam": [...], "erro": str?}"""
+    """Sobe o arquivo no espaço `tipo` da vida `cpf` (titular OU dependente) e confirma os documentos do pedido.
+    09/11/2026 (André/Vinicios: um campo por documento, também do dependente): a tela da Hapvida sobe no número de
+    controle DA VIDA (requiredDocs[].controlNumber) com o número e o CPF do TITULAR no formulário, e confirma titular +
+    dependentes juntos. -> {"ok": bool, "faltam": [...], "erro": str?}"""
     cpf = re.sub(r"\D", "", cpf).zfill(11)
     h = _sessao(contrato)
-    docs = [d for d in _docs(h, pedido) if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) == cpf]
-    if not docs:
-        return {"ok": False, "erro": f"o pedido {pedido} não tem documentos para o CPF informado"}
-    espacos = [x.get("description") for x in docs[0].get("documents") or []]
+    req = _docs(h, pedido)
+    vida = next((d for d in req if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) == cpf), None)
+    if not vida:
+        return {"ok": False, "sem_espaco": True, "erro": f"o pedido {pedido} não tem documentos para o CPF informado"}
+    espacos = [x.get("description") for x in vida.get("documents") or []]
     if tipo not in espacos:
-        return {"ok": False, "erro": f"o pedido {pedido} não tem o espaço '{tipo}' (tem: {', '.join(filter(None, espacos))})"}
-    if str(docs[0].get("type") or "").lower() not in ("titular", "holder"):
-        return {"ok": False, "erro": "anexo de dependente pelo robô ainda não mapeado"}
+        return {"ok": False, "sem_espaco": True,
+                "erro": f"o pedido {pedido} não tem o espaço '{tipo}' (tem: {', '.join(filter(None, espacos))})"}
+    tit = next((r for r in req if str(r.get("type") or "").lower() in ("titular", "holder")), vida)
     arq = _sem_acento(nome)
-    up = httpx.post(f"{LS}/{pedido}/document", headers={k: v for k, v in h.items() if k != "Accept"}, timeout=120,
-                    files={"file": (arq, conteudo, mime)},
-                    data={"holderControlNumber": pedido, "type": tipo, "holderDocumentNumber": cpf})
+    up = httpx.post(f"{LS}/{vida.get('controlNumber') or pedido}/document", headers={k: v for k, v in h.items() if k != "Accept"},
+                    timeout=120, files={"file": (arq, conteudo, mime)},
+                    data={"holderControlNumber": str(tit.get("controlNumber") or pedido), "type": tipo,
+                          "holderDocumentNumber": re.sub(r"\D", "", str(tit.get("document") or cpf)).zfill(11)})
     if not up.is_success:
         return {"ok": False, "erro": f"upload respondeu {up.status_code}: {up.text[:200]}"}
-    # confirma com TODOS os anexos do pedido (os de antes + o novo), como a tela faz
-    docs = [d for d in _docs(h, pedido) if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) == cpf]
-    anexos = [{"documentType": x["description"], "fileName": x["fileName"], "name": x.get("name") or x["fileName"],
-               "path": x.get("path") or "", "type": x.get("type") or ""}
-              for x in docs[0].get("documents") or [] if x.get("fileName")]
-    conf = httpx.post(f"{LS}/{pedido}/required-documents", headers=h, timeout=90,
-                      json={"holder": {"controlCode": int(pedido), "attachments": anexos}, "dependents": []})
-    faltam = [x["description"] for x in docs[0].get("documents") or [] if x.get("required") and not x.get("fileName")]
+    req = _docs(h, pedido)                     # confirma com TODOS os anexos do pedido (os de antes + o novo), como a tela
+    conf = httpx.post(f"{LS}/{pedido}/required-documents", headers=h, timeout=90, json=confirmacao(req, pedido))
+    vida = next((d for d in req if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) == cpf), {})
+    faltam = [x["description"] for x in vida.get("documents") or [] if x.get("required") and not x.get("fileName")]
     if not conf.is_success:
         return {"ok": False, "anexado": True, "faltam": faltam,
                 "erro": f"anexou, mas a confirmação respondeu {conf.status_code}: {conf.text[:200]}"}
