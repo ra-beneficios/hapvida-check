@@ -634,6 +634,29 @@ def mov_anexar_documento(p: AnexarDocumento):
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
+class CorrigirNascimento(BaseModel):
+    contrato: str
+    pedido: str
+    cpf: str
+    nascimento: str | None = None       # digitada no chamado; sem ela decide pela data da Hapvida / Receita
+    data_hapvida: str | None = None     # do cadastro da Hapvida (censo no banco)
+    executar: bool = False
+
+
+@app.post("/mov/corrigir-nascimento")
+def mov_corrigir_nascimento(p: CorrigirNascimento):
+    """09/11/2026 (André, MOV-14 Angelo/Helloá): troca a data de nascimento no pedido Pendente ("Tratar pendência" da
+    tela) e devolve à validação. Quem chama segura a vez no portal."""
+    import pedido_pendencia
+    try:
+        r = pedido_pendencia.corrigir_nascimento(p.contrato.strip().upper(), p.pedido, p.cpf, p.nascimento, p.executar,
+                                                 p.data_hapvida)
+        r.pop("payload", None)
+        return r
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 class ConsultarCpfs(BaseModel):
     contrato: str
     cpfs: list[str]

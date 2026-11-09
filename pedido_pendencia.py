@@ -6,8 +6,16 @@ criaria outro pedido. A tela da Hapvida edita o pedido com:
 
   GET  life-screen/control-number/{cn}/edition-lock           (a tela abre a trava ao entrar)
   GET  life-screen/control-number/{cn}/dependents             (dados do pedido)
-  PUT  life-screen/control-number/{cn}/dependents/pendencies  (o "Salvar" do modo with-pendency)
+  PUT  life-screen/control-number/{cn}/dependents/pendencies  (o "Salvar" do modo with-pendency, dependente)
+  PUT  life-screen/control-number/{cn}/pendencies             (o mesmo, titular: GET life-screen/control-number/{cn})
   DELETE life-screen/control-number/{cn}/edition-lock
+  POST life-screen/control-number/{cn}/finish-typing          (o "Enviar" da revisão: devolve à validação)
+
+Titular: no modo pendência a tela obriga escolher a data de início do plano (plan-start-date/.../pending-issues:
+originalStartDate, cutOffDate, startDate). Vai a ORIGINAL (a vigência que o cliente pediu no arquivo).
+Qual data usar (decidir_data): a digitada pelo pós-vendas; senão a do cadastro da própria Hapvida (censo, regra do
+André: "vale a da Hapvida"); senão a da Receita (life-data) quando ela difere do pedido. Sem nenhuma: documento.
+1ª vez (09/11/2026): Angelo 69928354 e Helloá 69928256 (4DFEV) -> Processado na hora.
 
 O corpo do PUT é o mesmo que o JS da tela monta (main.229a5ef7.js, funções de mapeamento do formulário de dependentes):
 GET -> formulário -> payload. Só a vida corrigida vai como "Updated" (2); as outras vão "NotChanged" (0), iguais.
@@ -19,6 +27,7 @@ Depois do PUT o pedido é lido de novo e a data é conferida.
 import json
 import re
 import sys
+import time
 
 sys.path[:0] = ["/app", "/lifetools_service"]
 from saneamento import coleta_portal  # noqa: E402
@@ -27,6 +36,7 @@ API = coleta_portal.API
 LS = f"{API}/movements/life-screen/control-number"
 NOT_CHANGED, UPDATED = 0, 2
 PRIMARY_MEMBER_INCLUSION = "4"      # OI.PRIMARY_MEMBER_INCLUSION: inclusão junto do titular (não "contrato ativo")
+ORIGINAL_DATE = "1"                 # OI.ORIGINAL_DATE
 
 
 def _data_iso(ddmmaaaa: str | None) -> str | None:
@@ -126,6 +136,69 @@ def montar(deps: dict, holder: dict, cpf: str, nascimento: str, quem: dict) -> d
     return _limpo(corpo)
 
 
+def montar_titular(dados: dict, contrato: str, nascimento: str, inicio: dict, quem: dict) -> dict:
+    """Payload do PUT pendencies (titular), como o formulário do titular da tela monta."""
+    h = dados.get("holder") or {}
+    pw, plano, end = h.get("payWaitingPeriod") or {}, h.get("plan") or {}, h.get("address") or {}
+    dental, contato, cons = plano.get("dentalPlan") or {}, h.get("contact") or {}, h.get("consigned") or {}
+    reemb, ident = h.get("reimbursement") or {}, h.get("identityCard") or {}
+    decl = [{"questionNumber": str(q["questionNumber"]), "response": bool(q.get("response")),
+             "description": q.get("description") or ""} for q in h.get("healthDeclarations") or [] if q.get("questionNumber")]
+    inicio_data = inicio.get("originalStartDate") or _ddmmaaaa(plano.get("startDate"))
+    corpo = {
+        "controlNumber": _bn(dados.get("controlNumber"), int),
+        "company": {"partnerCompany": _bn(contrato), "unit": _bn((dados.get("company") or {}).get("unit")),
+                    "requesterName": quem.get("name") or "", "requesterEmail": quem.get("email") or ""},
+        "holder": {
+            "name": _bn(h.get("name")), "birthDate": _bn(_data_iso(nascimento)),
+            "document": _bn(re.sub(r"\D", "", str(h.get("document") or "")).zfill(11)), "gender": _bn(h.get("gender")),
+            "civilStatus": _bn(h.get("civilStatus"), int), "mothersName": _bn(h.get("mothersName")),
+            "pis": _bn(h.get("pis")), "ctps": _bn(h.get("ctps")), "ctpsSeries": _bn(h.get("ctpsSeries")),
+            "cnsCode": _bn(h.get("cnsCode")), "companyRegistration": _bn(h.get("companyRegistration")),
+            "registrationSequence": _bn(h.get("registrationSequence")),
+            "liveBirthDeclaration": _bn(h.get("liveBirthDeclaration")),
+            "identityCard": _bn(ident.get("number") if isinstance(ident, dict) else ident),
+            "identityCardIssuerCode": _bn(ident.get("issuerCode") if isinstance(ident, dict) else h.get("identityCardIssuerCode")),
+            "identityCardUf": _bn(ident.get("uf") if isinstance(ident, dict) else h.get("identityCardUf")),
+            "admissionAt": _bn(_data_iso(_ddmmaaaa(h.get("admissionAt")))),
+            "occupation": _bn((h.get("occupation") or {}).get("occupationCode") if isinstance(h.get("occupation"), dict) else h.get("occupation"), int),
+            "contact": {"phoneNumber": _bn(re.sub(r"\D", "", str(contato.get("phoneNumber") or ""))),
+                        "cellNumber": _bn(re.sub(r"\D", "", str(contato.get("cellNumber") or ""))), "email": _bn(contato.get("email"))},
+            "healthDeclarations": decl or None,
+            "plan": {"startDate": _bn(_data_iso(inicio_data)),
+                     "health": {"code": _bn((plano.get("healthPlan") or {}).get("healthPlanCode")),
+                                "careLocation": _bn((plano.get("careLocation") or {}).get("careLocationCode"))},
+                     "dental": {"code": _bn(dental.get("dentalCode")), "companyCode": _bn(dental.get("dentalCompanyCode"))},
+                     "startDateType": ORIGINAL_DATE},
+            "payWaitingPeriod": {"waitingPeriod": _bn(_data_iso(_ddmmaaaa(pw.get("waitingPeriod")))),
+                                 "beneficiaryCode": _bn(pw.get("beneficiaryCode")),
+                                 "healthInsuranceCode": _bn(pw.get("healthInsuranceCode")),
+                                 "startDate": _bn(_data_iso(_ddmmaaaa(pw.get("startDate")))),
+                                 "endDate": _bn(_data_iso(_ddmmaaaa(pw.get("endDate")))),
+                                 "segmentation": _bn((pw.get("segmentation") or {}).get("segmentationCode"), int),
+                                 "accommodation": _bn((pw.get("accommodation") or {}).get("accommodationCode"), int)},
+            "address": {"zipCode": _bn(re.sub(r"\D", "", str(end.get("zipCode") or ""))), "typePublicPlace": _bn(end.get("typePublicPlace")),
+                        "publicPlace": _bn(end.get("publicPlace")), "number": _bn(end.get("number")),
+                        "complement": _bn(end.get("complement")), "district": _bn(end.get("district")),
+                        "city": _bn(end.get("city")), "stateCode": _bn(end.get("stateCode")),
+                        "referencePoint": _bn(end.get("referencePoint"))},
+            "reimbursement": {"bankCode": _bn(reemb.get("bankCode")), "agency": _bn(reemb.get("agency")),
+                              "account": _bn(reemb.get("account")), "digit": _bn(reemb.get("digit"))},
+            "consigned": {"salary": _bn(cons.get("salary")), "billingType": _bn(cons.get("billingType")),
+                          "contractNumber": _bn(cons.get("contractNumber")),
+                          "isPensioner": cons.get("isPensioner") if isinstance(cons.get("isPensioner"), bool) else None,
+                          "isEmployeeOnLeave": cons.get("isEmployeeOnLeave") if isinstance(cons.get("isEmployeeOnLeave"), bool) else None,
+                          "hasSubsidy": cons.get("hasSubsidy") if isinstance(cons.get("hasSubsidy"), bool) else None,
+                          "dailySubsidy": cons.get("dailySubsidy") if isinstance(cons.get("dailySubsidy"), bool) else None,
+                          "beneficiaryClassification": _bn(cons.get("beneficiaryClassification")),
+                          "pensionerRegistration": _bn(cons.get("pensionerRegistration")),
+                          "complementaryRegistration": _bn(cons.get("complementaryRegistration")),
+                          "payrollDeduction": _bn(cons.get("payrollDeduction")), "employmentLink": _bn(cons.get("employmentLink"))},
+            "ocrDocuments": h.get("ocrDocuments") or None,
+        }}
+    return _limpo(corpo)
+
+
 def _quem(page) -> dict:
     try:
         bruto = page.evaluate("() => localStorage.getItem('@hapvida/account-data')") or "{}"
@@ -136,7 +209,18 @@ def _quem(page) -> dict:
         return {"name": "", "email": ""}
 
 
-def corrigir_nascimento(contrato: str, pedido: str, cpf: str, nascimento: str, executar: bool = False) -> dict:
+def decidir_data(atual: str, digitada: str | None, hapvida: str | None, receita: str | None) -> tuple[str | None, str]:
+    """-> (data nova, fonte). None = nenhuma fonte diz outra data (o caminho é o documento)."""
+    for data, fonte in ((digitada, "pós-vendas"), (hapvida, "cadastro da Hapvida"), (receita, "Receita")):
+        if data and re.fullmatch(r"\d{2}/\d{2}/\d{4}", data) and data != atual:
+            return data, fonte
+    return None, ""
+
+
+def corrigir_nascimento(contrato: str, pedido: str, cpf: str, nascimento: str | None = None, executar: bool = False,
+                        data_hapvida: str | None = None, enviar: bool = True) -> dict:
+    """Troca a data de nascimento de `cpf` no pedido (titular ou dependente) e devolve à validação (finish-typing).
+    Sem `nascimento`, decide pela data da Hapvida (data_hapvida, do censo) e pela Receita."""
     cpf = re.sub(r"\D", "", cpf).zfill(11)
     with coleta_portal.sessao(contrato) as (page, h):
         def get(url):
@@ -144,35 +228,68 @@ def corrigir_nascimento(contrato: str, pedido: str, cpf: str, nascimento: str, e
             if not r.ok:
                 raise RuntimeError(f"Hapvida respondeu {r.status} em {url.rsplit('/', 2)[-2:]}: {r.text()[:200]}")
             return r.json().get("content") or {}
-        deps = get(f"{LS}/{pedido}/dependents")
+
+        def doc(x):
+            return re.sub(r"\D", "", str(x.get("document") or "")).zfill(11)
+        receita = None
+        if not nascimento and not data_hapvida:
+            # antes de ler o pedido: com pedido pendente a Receita vem por outro contrato (troca e volta a sessão)
+            ld = coleta_portal.life_data(page, h, contrato, cpf) or {}
+            receita = ld.get("birthDate") if not ld.get("_ja_ativo_em") else None
         holder = get(f"{LS}/{pedido}")
-        antes = next((d for d in deps.get("dependents") or []
-                      if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) == cpf), {})
-        corpo = montar(deps, holder, cpf, nascimento, _quem(page))
-        res = {"pedido": pedido, "cpf": cpf, "status": deps.get("holderMovementStatusDescription"),
-               "antes": _ddmmaaaa(antes.get("birthDate")), "pedido_para": nascimento, "payload": corpo}
+        titular = doc(holder.get("holder") or {}) == cpf
+        deps = {} if titular else get(f"{LS}/{pedido}/dependents")
+        vida = (holder.get("holder") or {}) if titular else next((d for d in deps.get("dependents") or [] if doc(d) == cpf), None)
+        if not vida:
+            raise ValueError(f"CPF {cpf} não está no pedido {pedido}")
+        status = str((holder.get("movementStatus") or {}).get("code") or deps.get("holderMovementStatusCode") or "")
+        atual = _ddmmaaaa(vida.get("birthDate"))
+        nova, fonte = decidir_data(atual, nascimento, data_hapvida, receita)
+        res = {"pedido": pedido, "cpf": cpf, "titular": titular, "status": status, "antes": atual, "nova": nova,
+               "fonte": fonte, "receita": receita}
+        if not nova:
+            res["sem_fonte"] = True
+            return res
+        if titular:
+            inicio = get(f"{API}/movements/forms/partner-company/{contrato}/plan-start-date/control-number/{pedido}/pending-issues")
+            corpo, url = montar_titular(holder, contrato, nova, inicio, _quem(page)), f"{LS}/{pedido}/pendencies"
+        else:
+            corpo, url = montar(deps, holder, cpf, nova, _quem(page)), f"{LS}/{pedido}/dependents/pendencies"
+        res["payload"] = corpo
         if not executar:
             return res
-        if str(deps.get("holderMovementStatusCode")) != "1":
-            raise RuntimeError(f"pedido {pedido} não está Pendente ({deps.get('holderMovementStatusDescription')})")
+        if status != "1":
+            raise RuntimeError(f"pedido {pedido} não está Pendente (situação {status})")
         page.request.get(f"{LS}/{pedido}/edition-lock", headers=h, timeout=60000)
         try:
-            r = page.request.put(f"{LS}/{pedido}/dependents/pendencies", headers={**h, "content-type": "application/json"},
-                                 data=json.dumps(corpo), timeout=120000)
-            res["http"] = r.status
-            res["resposta"] = r.text()[:1500]
+            r = page.request.put(url, headers={**h, "content-type": "application/json"}, data=json.dumps(corpo), timeout=120000)
+            res["http"], res["resposta"] = r.status, r.text()[:800]
         finally:
             page.request.delete(f"{LS}/{pedido}/edition-lock", headers=h, timeout=60000)
-        depois = get(f"{LS}/{pedido}/dependents")
-        d2 = next((d for d in depois.get("dependents") or []
-                   if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) == cpf), {})
-        res["depois"] = _ddmmaaaa(d2.get("birthDate"))
-        res["status_depois"] = depois.get("holderMovementStatusDescription")
-        res["ok"] = res["depois"] == nascimento
+        if res["http"] >= 300:
+            res["ok"] = False
+            return res
+        de_novo = get(f"{LS}/{pedido}") if titular else get(f"{LS}/{pedido}/dependents")
+        v2 = (de_novo.get("holder") or {}) if titular else next((d for d in de_novo.get("dependents") or [] if doc(d) == cpf), {})
+        res["depois"] = _ddmmaaaa(v2.get("birthDate"))
+        res["ok"] = res["depois"] == nova
+        if res["ok"] and enviar:
+            page.request.get(f"{LS}/{pedido}/edition-lock", headers=h, timeout=60000)
+            f = page.request.post(f"{LS}/{pedido}/finish-typing", headers=h, timeout=120000)
+            res["enviado"] = f.status < 300
+            fim = time.time() + 120
+            st = {}
+            while time.time() < fim:
+                time.sleep(15)
+                st = (page.request.get(f"{LS}/{pedido}/status", headers=h).json().get("content") or {}).get("status") or {}
+                if str(st.get("code")) not in ("1", "22"):
+                    break
+            res["situacao"] = st.get("description")
+            res["situacao_codigo"] = str(st.get("code") or "")
         return res
 
 
 if __name__ == "__main__":
     a = [x for x in sys.argv[1:] if not x.startswith("--")]
-    r = corrigir_nascimento(a[0].upper(), a[1], a[2], a[3], executar="--executar" in sys.argv)
+    r = corrigir_nascimento(a[0].upper(), a[1], a[2], a[3] if len(a) > 3 else None, executar="--executar" in sys.argv)
     print(json.dumps(r, ensure_ascii=False, indent=1, default=str))
