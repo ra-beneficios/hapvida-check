@@ -492,6 +492,14 @@ def processar_linha(cur, linha: dict) -> None:
             extra_recusas = _registrar_recusas_exclusao(linha, codigo_contrato, movimento.get("controlCode"), None)
             if status_raw in STATUS_COM_CRITICA and _rodar_ciclo(cur, linha, movimento.get("controlCode")):
                 return
+            if status_raw in STATUS_COM_CRITICA and tipo == "inclusão" and CICLO_NO_VIGIA:
+                # 09/11/2026 (MOV-16 Ivan/Michel, 1339005): o ciclo caiu (ViaCEP) e a crítica "cep não é válido" de 12
+                # arquivos sumiu em silêncio — o chamado dizia "a Hapvida não registrou". Arquivo com crítica não fecha
+                # sem o ciclo ler: tenta de novo em 30 min; na 2ª falha vai o relatório cru à TI (ramo abaixo).
+                cur.execute("""UPDATE movimentacoes_hapvida_acompanhamento
+                               SET status = 'AGUARDANDO_CHECAGEM_RELATORIO', proxima_checagem_em = now() + interval '30 minutes'
+                               WHERE id = %s""", (linha["id"],))
+                return
             if tipo == "exclusão":
                 if not (meio_do_lote and not extra_recusas):
                     _aviso_final_exclusao(avisar, codigo_contrato, nome_arquivo, extra_recusas, linha, meio_do_lote)
