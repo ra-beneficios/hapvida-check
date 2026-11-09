@@ -327,6 +327,54 @@ def _ficha_novo_dependente(page, menu: str, cpf_titular: str) -> bool:
         return False
 
 
+def _codigos_ativos(page) -> dict[str, str]:
+    """CPF -> código de usuário (ex.: 2M2DX001119001), da Lista Usuários Ativos (a mesma leitura do pré-cancelamento)."""
+    pessoa = re.search(r"pPessoa=(\d+)", page.content() + page.url).group(1)
+    sess = re.search(r"pIdSessao=([^&\"']+)", page.url).group(1)
+    base = page.url.split("/pls/")[0] + "/pls/webhap/webNewCadastroUsuario."
+    page.goto(f"{base}Usuario?pPessoa={pessoa}&pNoCache={int(time.time() * 1000)}&pIdSessao={sess}", timeout=600000,
+              wait_until="domcontentloaded")         # 2M2DX/S7HNK: lista enorme
+    return {re.sub(r"\D", "", c): k for c, k in
+            re.findall(r"(\d{3}\.\d{3}\.\d{3}-\d{2})\s+(?:\d+\s+)?([A-Z0-9]{5}\d{9})", _txt(page.content()))}
+
+
+def _ficha_dependente_de_ativo(page, menu: str, codigo_titular: str) -> bool:
+    """09/11/2026 (André, MOV-000019 Daiana: "tem que incluir dependente, o que a TI vai fazer com isso?"): dependente de
+    titular JÁ ATIVO no Premium entra pela tela "Inclusão de Novos Dependentes" (menu Inclusão de Dependente ->
+    InclusaoDependenteCodigo): código de usuário do titular -> verificaTitular -> InclusaoDependenteFicha, a mesma ficha
+    de dependente que _dependente preenche. -> True se a ficha abriu."""
+    base = page.url.split("/pls/")[0] + "/pls/webhap/webNewCadastroUsuario."
+    q = menu.split("?", 1)[1] if "?" in menu else ""
+    page.goto(f"{base}InclusaoDependenteCodigo?{q}&pRN=N")
+    page.wait_for_load_state("networkidle")
+    page.fill("input[name=pCodigoTitular]", codigo_titular)
+    with page.expect_navigation(timeout=30000):
+        page.evaluate("document.forms[0].submit()")      # o JS da tela só aceita números; o Legado aceita o código
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2000)
+    try:
+        page.wait_for_selector("#pCpf", state="visible", timeout=30000)
+        return True
+    except Exception:
+        return False
+
+
+def _novos_dependentes(page, menu: str, f: dict, html: Path, alertas: list, codigos: dict) -> dict:
+    """Família cujo titular já está ativo no Premium: só os dependentes, pela tela de Novos Dependentes."""
+    r = {"titular": "ATIVO", "deps": {}}
+    codigo = codigos.get(f["cpf"])
+    if not codigo:
+        r["erro"] = "titular não está na lista de ativos do Odonto Premium"
+        return r
+    r["codigo_titular"] = codigo
+    for d in f["deps"]:
+        if not page.query_selector("#pCpf") and not _ficha_dependente_de_ativo(page, menu, codigo):
+            r["erro"] = "a tela de Novos Dependentes não abriu a ficha"
+            break
+        r["deps"][d["cpf"]] = _dependente(page, d, html, alertas)
+    return r
+
+
 def incluir(cod: str, familias: list[dict], sessao: dict | None = None, saude: str | None = None) -> dict:
     """Formulário do Legado: titular + dependentes, família por família. -> {cpf_titular: {titular, deps: {cpf: msg}}}
     saude: código do contrato de Saúde — nome/mãe/nascimento/sexo vêm do cadastro ativo lá (06/11/2026)."""
@@ -356,7 +404,19 @@ def incluir(cod: str, familias: list[dict], sessao: dict | None = None, saude: s
         page.on("dialog", lambda dg: (alertas.append(dg.message), dg.accept()))
         try:
             menu = _login(page, cod, sessao)
+            codigos = None
             for f in familias:
+                if f.get("titular_ativo"):
+                    if codigos is None:
+                        codigos = _codigos_ativos(page)
+                        page.goto(menu)
+                    feitos = (res.get(f["cpf"]) or {}).get("deps") or {}
+                    f = dict(f, deps=[d for d in f["deps"] if "SUCESSO" not in (feitos.get(d["cpf"]) or "").upper()])
+                    r = _novos_dependentes(page, menu, f, html, alertas, codigos)
+                    r["deps"] = {**feitos, **r["deps"]}
+                    res[f["cpf"]] = r
+                    _gravar(arq, res)
+                    continue
                 ja = (res.get(f["cpf"]) or {}).get("titular") or ""
                 if ja == "OK" or ja.startswith("PENDENTE_DOC"):
                     continue        # já foi: não cadastra de novo (FALHA/BLOQUEADO tenta de novo — 04/11: "pedido digitado")
