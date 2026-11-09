@@ -2,6 +2,17 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## (próxima) 08–09/11/2026 noite — auditoria "olhando tudo"
+- **Raspagem dos 37 contratos e do código da tela da Hapvida.** Achados:
+  - existem 7 tipos de movimentação e a conferência só lia "Inclusion";
+  - as críticas de um pedido iam para todas as vidas dele;
+  - "Processado" (9) é a vida incluída: 96% batem com a base;
+  - 108 pedidos abertos que ninguém acompanhava.
+- **Conferência:**
+  - lê Inclusion, DependentInclusion e Transfer;
+  - críticas por vida (`dependentControlNumber`), incluindo as de documento (`documentIssues`).
+- **Nova rota `/mov/pedidos-contrato`** (só leitura): todos os pedidos de 180 dias, base do inventário diário do lifetools (`movimentacoes.varredura`, 03:10).
+
 ## hc-2026.11.08-4 (08/11/2026 tarde) — auditoria MOV, rodada 2 · reverter: hc-2026.11.08-3
 - **Odonto Premium, pendência 346 (André: "remova nome da mãe, data de nascimento e aplique o CPF de novo"):**
   - a ficha do dependente é limpa antes de digitar o CPF (antes guardava o dependente anterior);

@@ -574,6 +574,28 @@ def mov_situacao_pedidos(p: SituacaoPedidos):
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
+class PedidosContrato(BaseModel):
+    contrato: str
+    dias: int = 179
+
+
+@app.post("/mov/pedidos-contrato")
+def mov_pedidos_contrato(p: PedidosContrato):
+    """08/11/2026 (auditoria MOV, André: "garanta que estamos olhando tudo"): só leitura — TODOS os pedidos do contrato
+    nos últimos `dias` (todos os tipos: inclusão, inclusão de dependente, transferência, alteração, exclusão...), como
+    a tela "Acompanhar movimentações" mostra. Quem chama (lifetools, movimentacoes.varredura) segura a vez no portal."""
+    import re as _re
+    import pedidos_situacao
+    contrato = p.contrato.strip().upper()
+    if not _re.fullmatch(r"[0-9A-Z]{5}", contrato):
+        raise HTTPException(status_code=400, detail="contrato inválido")
+    try:
+        h = pedidos_situacao._sessao(contrato)
+        return {"contrato": contrato, "movimentos": pedidos_situacao._pedidos(h, contrato, max(1, min(p.dias, 179)))}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 class LegadoSituacao(BaseModel):
     codigo: str
 

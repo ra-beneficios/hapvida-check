@@ -51,6 +51,24 @@ def _pedidos(h: dict, contrato: str, dias: int = 179) -> list[dict]:
             return out
 
 
+TIPOS_INCLUSAO = ("Inclusion", "DependentInclusion", "Transfer")
+
+
+def criticas_da_vida(beneficiarios: list[dict], dep_cn: str) -> list[str]:
+    """Críticas (de cadastro e de documento) só da vida do pedido: titular = dependentControlNumber 0."""
+    out = set()
+    for b in beneficiarios:
+        h = b.get("health") or {}
+        if str(h.get("dependentControlNumber") or "0") != str(dep_cn or "0"):
+            continue
+        for chave in ("issues", "documentIssues"):
+            for i in h.get(chave) or []:
+                msg = i.get("message") or i.get("description") if isinstance(i, dict) else str(i)
+                if msg:
+                    out.add(msg)
+    return sorted(out)
+
+
 def _data(s: str | None) -> tuple:
     m = re.match(r"(\d{2})/(\d{2})/(\d{4})", s or "")
     return (m.group(3), m.group(2), m.group(1)) if m else ("", "", "")
@@ -68,7 +86,10 @@ def situacao(contrato: str, cpfs: list[str]) -> dict:
     por_cpf: dict[str, dict] = {}
     for m in _pedidos(h, contrato):
         cpf = str(m.get("cpfNumber") or "").zfill(11)
-        if cpf not in cpfs or m.get("operationDescription") != "Inclusion":
+        # 08/11/2026 (auditoria MOV, código da tela da Hapvida): os tipos são Inclusion, DependentInclusion, Transfer,
+        # Alteration, CancellationExclusion, Suspension, Reactivation. Só "Inclusion" era lido: a vida que entrou como
+        # inclusão de dependente de titular ativo ou por transferência feita pela Hapvida ficava "não achei o pedido".
+        if cpf not in cpfs or m.get("operationDescription") not in TIPOS_INCLUSAO:
             continue
         atual = por_cpf.get(cpf)          # o pedido de inclusão mais recente do CPF
         chave = (_data(m.get("typingDate")), int(m.get("controlNumber") or 0))
@@ -81,7 +102,8 @@ def situacao(contrato: str, cpfs: list[str]) -> dict:
             out[cpf] = {"nao_achou": True}
             continue
         cn = str(m["controlNumber"])
-        r = {"pedido": cn, "dependente": str(m.get("dependentControlNumber") or "0") != "0",
+        dep_cn = str(m.get("dependentControlNumber") or "0")
+        r = {"pedido": cn, "dependente": dep_cn != "0", "tipo": m.get("operationDescription"),
              "situacao": m.get("processingStatusDescription"), "situacao_codigo": str(m.get("processingStatus") or ""),
              "situacao_em": m.get("statusDate"), "digitado_em": m.get("typingDate"), "vigencia": m.get("startDate"),
              "pendencia": (m.get("pendingDescription") or "").strip() or None,
@@ -89,8 +111,10 @@ def situacao(contrato: str, cpfs: list[str]) -> dict:
         if r["situacao_codigo"] not in ("99",):           # ativo: nada mais a ler
             try:
                 iss = _get(h, f"{LS}/{cn}/issues").get("beneficiaries") or []
-                r["criticas"] = sorted({i.get("message") for b in iss for i in (b.get("health") or {}).get("issues") or []
-                                        if i.get("message")})
+                # 08/11/2026 (MOV-000012 Daniel/Gabriel, pedido 69829162): as críticas vêm por vida
+                # (health.dependentControlNumber; 0 = titular) — antes todas iam para todas as vidas do pedido; e as de
+                # documento (documentIssues) nem eram lidas
+                r["criticas"] = criticas_da_vida(iss, dep_cn)
                 for d in _docs(h, cn):
                     if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) != cpf:
                         continue
