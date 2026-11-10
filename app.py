@@ -678,6 +678,42 @@ def mov_corrigir_nascimento(p: CorrigirNascimento):
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
+class PerguntasDeclaracao(BaseModel):
+    contrato: str
+    cpf_titular: str
+
+
+@app.post("/mov/dependente/perguntas")
+def mov_dependente_perguntas(p: PerguntasDeclaracao):
+    """10/11/2026 (André, MOV-4 Magnolia): as perguntas da declaração de saúde da tela da Hapvida — o pós-vendas responde
+    no chamado, copiando da declaração assinada. Só leitura."""
+    import pedido_dependente
+    try:
+        return {"perguntas": pedido_dependente.perguntas(p.contrato.strip().upper(), p.cpf_titular)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
+class IncluirDependente(BaseModel):
+    contrato: str
+    pedido: str
+    novo: dict
+    executar: bool = False
+
+
+@app.post("/mov/dependente/incluir")
+def mov_dependente_incluir(p: IncluirDependente):
+    """10/11/2026: inclui o dependente no pedido Pendente do titular ("Inclusão de dependentes" da tela). Quem chama
+    segura a vez no portal. Sem `executar`, só monta e confere o que falta."""
+    import pedido_dependente
+    try:
+        r = pedido_dependente.incluir(p.contrato.strip().upper(), p.pedido, p.novo, p.executar)
+        r.pop("payload", None)
+        return r
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 class ConsultarCpfs(BaseModel):
     contrato: str
     cpfs: list[str]
