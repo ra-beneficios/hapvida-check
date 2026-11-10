@@ -579,6 +579,26 @@ class PedidosContrato(BaseModel):
     dias: int = 179
 
 
+class CriticasContrato(BaseModel):
+    contrato: str
+    dias: int = 30
+
+
+@app.post("/mov/criticas-contrato")
+def mov_criticas_contrato(p: CriticasContrato):
+    """10/11/2026 (André: "também não tem crítica de fora do portal?"): só leitura — as vidas criticadas nos arquivos do
+    contrato nos últimos `dias` (o arquivo subiu e a vida não virou pedido). Quem chama segura a vez no portal."""
+    import re as _re
+    import pedidos_situacao
+    contrato = p.contrato.strip().upper()
+    if not _re.fullmatch(r"[0-9A-Z]{5}", contrato):
+        raise HTTPException(status_code=400, detail="contrato inválido")
+    try:
+        return {"contrato": contrato, "criticas": pedidos_situacao.criticas_contrato(contrato, max(1, min(p.dias, 90)))}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 @app.post("/mov/pedidos-contrato")
 def mov_pedidos_contrato(p: PedidosContrato):
     """08/11/2026 (auditoria MOV, André: "garanta que estamos olhando tudo"): só leitura — TODOS os pedidos do contrato

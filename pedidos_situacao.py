@@ -261,3 +261,48 @@ def legado_situacao(cod: str) -> dict:
         pedidos.append({"nome": m.group(1).strip(), "cpf": m.group(2).zfill(11), "digitado": m.group(3),
                         "status": m.group(4), "pendencia": pend.group(1).strip() if pend else None})
     return {"ativos": ativos, "pedidos": pedidos}
+
+
+# ── críticas dos arquivos (10/11/2026, André: "também não tem crítica de fora do portal?") ─────────────────────
+# A lista de pedidos só traz vida que VIROU pedido. A crítica (o arquivo subiu e a vida não virou pedido) está na
+# movimentação por arquivo: movements-list -> lifes-with-summary?review=true, vida com status "Reviewed". Só leitura.
+REVISADO = ("FileProcessedWithReview", "ProcessFileWithPendency")
+
+
+def criticas_contrato(contrato: str, dias: int = 30) -> list[dict]:
+    """-> [{controle, enviado_em, cpf, nome, papel, mensagens}] das vidas criticadas nos arquivos dos últimos `dias`."""
+    mov = f"{API}/movements/partner-company"           # o mesmo de saneamento.coleta_portal.MOV
+    h = _sessao(contrato)
+    limite = (date.today() - timedelta(days=dias)).isoformat()
+    out, off = [], 0
+    while off < 3000:
+        c = _get(h, f"{mov}/{contrato}/movements-list", offset=off, limit=100)
+        lote = c.get("movements") or []
+        if not lote:
+            break
+        off += len(lote)
+        velhos = 0
+        for m in lote:
+            criado = str(m.get("createdAt") or "")[:10]
+            if criado and criado < limite:
+                velhos += 1
+                continue
+            if m.get("status") not in REVISADO:
+                continue
+            cc, voff = str(m["controlCode"]), 0
+            while True:
+                v = _get(h, f"{mov}/{contrato}/control-code/{cc}/lifes-with-summary", review="true", offset=voff, limit=200)
+                vidas = v.get("data") or []
+                for x in vidas:
+                    if x.get("status") != "Reviewed":
+                        continue
+                    life = x.get("life") or {}
+                    out.append({"controle": cc, "enviado_em": criado, "cpf": re.sub(r"\D", "", str(life.get("document") or "")).zfill(11),
+                                "nome": life.get("name"), "papel": life.get("beneficiaryType"),
+                                "mensagens": [str(r) for r in x.get("reviews") or []][:5]})
+                voff += len(vidas)
+                if not vidas or voff >= int(v.get("total") or 0):
+                    break
+        if velhos == len(lote):                  # a lista vem da mais nova para a mais velha
+            break
+    return out
