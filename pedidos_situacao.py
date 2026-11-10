@@ -147,11 +147,43 @@ def confirmacao(requeridos: list[dict], pedido: str) -> dict:
             "dependents": [{"controlCode": d.get("controlNumber"), "attachments": _anexos(d.get("documents"))} for d in deps]}
 
 
+def _com_o_novo(req: list[dict], vida_cn, tipo: str, c: dict) -> list[dict]:
+    """Os documentos do pedido com o arquivo que acabou de subir no espaço `tipo` da vida, como a tela faz (ela confirma
+    com a resposta do upload — fileName, name, path, contentType — e não com uma releitura; trocar = substituir)."""
+    novo = {"description": tipo, "required": True, "fileName": c.get("fileName"), "name": c.get("name") or "",
+            "path": c.get("path") or "", "type": c.get("contentType") or c.get("type") or ""}
+    out = []
+    for r in req:
+        r = dict(r, documents=[dict(x) for x in r.get("documents") or []])
+        if str(r.get("controlNumber")) == str(vida_cn):
+            i = next((k for k, x in enumerate(r["documents"]) if x.get("description") == tipo), None)
+            if i is None:
+                r["documents"].append(novo)
+            else:
+                r["documents"][i].update({k: v for k, v in novo.items() if k != "required"})
+        out.append(r)
+    return out
+
+
+def _nome_no_espaco(tipo: str, nome: str) -> str:
+    """Sem acento (a Hapvida recusa com 400) e com o espaço no começo: dois arquivos 'documento.pdf' em espaços
+    diferentes não se confundem no pedido."""
+    pre = re.sub(r"[^A-Z0-9]+", "_", _sem_acento(tipo).upper()).strip("_")[:24]
+    return f"{pre}-{_sem_acento(nome)}"
+
+
 def anexar(contrato: str, pedido: str, cpf: str, tipo: str, nome: str, mime: str, conteudo: bytes) -> dict:
     """Sobe o arquivo no espaço `tipo` da vida `cpf` (titular OU dependente) e confirma os documentos do pedido.
     09/11/2026 (André/Vinicios: um campo por documento, também do dependente): a tela da Hapvida sobe no número de
     controle DA VIDA (requiredDocs[].controlNumber) com o número e o CPF do TITULAR no formulário, e confirma titular +
-    dependentes juntos. -> {"ok": bool, "faltam": [...], "erro": str?}"""
+    dependentes juntos.
+    10/11/2026 (André: "se preocupou com retornos de erros, na ida e no retorno?"): cada etapa diz o que já aconteceu —
+      antes do upload: exceção (502 no app: nada subiu, pode repetir);
+      upload sem resposta: incerto (pode ter subido — não repete sozinho);
+      upload recusado: ok False (nada subiu);
+      depois do upload: anexado True em qualquer falha (subiu; não repetir o upload, só confirmar);
+      confirmado, mas o espaço segue vazio na releitura: anexado True (a Hapvida não registrou).
+    -> {"ok": bool, "faltam": [...], "erro": str?, "anexado"?, "incerto"?, "sem_espaco"?, "pedido_fechado"?}"""
     cpf = re.sub(r"\D", "", cpf).zfill(11)
     h = _sessao(contrato)
     req = _docs(h, pedido)
@@ -163,21 +195,34 @@ def anexar(contrato: str, pedido: str, cpf: str, tipo: str, nome: str, mime: str
         return {"ok": False, "sem_espaco": True,
                 "erro": f"o pedido {pedido} não tem o espaço '{tipo}' (tem: {', '.join(filter(None, espacos))})"}
     tit = next((r for r in req if str(r.get("type") or "").lower() in ("titular", "holder")), vida)
-    arq = _sem_acento(nome)
-    up = httpx.post(f"{LS}/{vida.get('controlNumber') or pedido}/document", headers={k: v for k, v in h.items() if k != "Accept"},
-                    timeout=120, files={"file": (arq, conteudo, mime)},
-                    data={"holderControlNumber": str(tit.get("controlNumber") or pedido), "type": tipo,
-                          "holderDocumentNumber": re.sub(r"\D", "", str(tit.get("document") or cpf)).zfill(11)})
+    arq = _nome_no_espaco(tipo, nome)
+    try:
+        up = httpx.post(f"{LS}/{vida.get('controlNumber') or pedido}/document",
+                        headers={k: v for k, v in h.items() if k != "Accept"}, timeout=120,
+                        files={"file": (arq, conteudo, mime)},
+                        data={"holderControlNumber": str(tit.get("controlNumber") or pedido), "type": tipo,
+                              "holderDocumentNumber": re.sub(r"\D", "", str(tit.get("document") or cpf)).zfill(11)})
+    except (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError) as e:
+        return {"ok": False, "incerto": True, "erro": f"o upload ficou sem resposta ({type(e).__name__}): pode ter subido"}
     if not up.is_success:
         return {"ok": False, "erro": f"upload respondeu {up.status_code}: {up.text[:200]}"}
-    req = _docs(h, pedido)                     # confirma com TODOS os anexos do pedido (os de antes + o novo), como a tela
-    conf = httpx.post(f"{LS}/{pedido}/required-documents", headers=h, timeout=90, json=confirmacao(req, pedido))
-    vida = next((d for d in req if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) == cpf), {})
-    faltam = [x["description"] for x in vida.get("documents") or [] if x.get("required") and not x.get("fileName")]
-    if not conf.is_success:
+    try:
+        c = (up.json() or {}).get("content") or {}
+        if not c.get("fileName"):
+            return {"ok": False, "anexado": True, "erro": f"o upload respondeu sem o nome do arquivo: {up.text[:200]}"}
+        req = _com_o_novo(_docs(h, pedido), vida.get("controlNumber"), tipo, c)
+        conf = httpx.post(f"{LS}/{pedido}/required-documents", headers=h, timeout=90, json=confirmacao(req, pedido))
+        if not conf.is_success:
+            return {"ok": False, "anexado": True, "erro": f"anexou, mas a confirmação respondeu {conf.status_code}: {conf.text[:200]}"}
+        depois = next((d for d in _docs(h, pedido) if re.sub(r"\D", "", str(d.get("document") or "")).zfill(11) == cpf), {})
+    except Exception as e:                       # o arquivo já subiu: nunca repetir o upload sozinho
+        return {"ok": False, "anexado": True, "erro": f"anexou, mas falhou depois ({type(e).__name__}: {e})"[:300]}
+    no_espaco = next((x for x in depois.get("documents") or [] if x.get("description") == tipo), {})
+    faltam = [x["description"] for x in depois.get("documents") or [] if x.get("required") and not x.get("fileName")]
+    if not (no_espaco.get("fileName") or "").strip():
         return {"ok": False, "anexado": True, "faltam": faltam,
-                "erro": f"anexou, mas a confirmação respondeu {conf.status_code}: {conf.text[:200]}"}
-    return {"ok": True, "faltam": faltam, "arquivo": arq}
+                "erro": f"confirmou, mas o espaço '{tipo}' continua vazio no pedido {pedido}"}
+    return {"ok": True, "faltam": faltam, "arquivo": no_espaco.get("fileName") or arq}
 
 
 # ── Odonto Premium no Legado (07/11/2026, André: "valida se ainda tem captcha") ─────────────────────────
