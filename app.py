@@ -651,6 +651,24 @@ def legado_cadastro_certificado(p: CadastroCertificado):
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
+class CepsLegado(BaseModel):
+    ceps: list[str]
+
+
+@app.post("/legado/cep")
+def legado_cep(p: CepsLegado):
+    """17/11/2026 (André, MOV-36): cidade e UF de cada CEP pela base da Hapvida (a que valida a ficha do Legado). Só
+    leitura. -> {"cep": {cep: {cidade, uf, bairro, logradouro} | null}}"""
+    import legado_cadastro
+    import odonto_premium
+    try:
+        return {"cep": legado_cadastro.ceps(p.ceps)}
+    except odonto_premium.SessaoLegado as e:
+        raise HTTPException(status_code=428, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 class AnexarDocumento(BaseModel):
     contrato: str
     pedido: str

@@ -20,5 +20,16 @@ class Resposta(unittest.TestCase):
         self.assertIsNone(lc.ler_resposta(""))
 
 
+class Cep(unittest.TestCase):
+    def test_cidade_do_cep(self):
+        r = ('{"cep":[ {"total":"1","nm_logradouro":"SALVADOR DE MENDONCA","cidade":"ITABORAI","bairro":"CENTRO",'
+             '"uf":"RJ","cd_tipo_logradouro":"R"}]}')
+        self.assertEqual(lc.ler_cep(r), {"cidade": "ITABORAI", "uf": "RJ", "bairro": "CENTRO",
+                                         "logradouro": "SALVADOR DE MENDONCA"})
+
+    def test_cep_que_o_legado_nao_conhece(self):
+        self.assertIsNone(lc.ler_cep('{"total":"0","nm_logradouro":"","cidade":"","bairro":"","uf":""}'))
+
+
 if __name__ == "__main__":
     unittest.main()
