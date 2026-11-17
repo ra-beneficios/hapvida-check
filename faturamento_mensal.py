@@ -489,7 +489,70 @@ def gerar_xlsx_pasta(pasta: str) -> int:
             gerados += 1
         except Exception as e:
             log(f"xlsx {nome}: ERRO {e}")
+    gerados += _xlsx_copart_do_pdf(pasta)
     return gerados
+
+
+def _xlsx_copart_do_pdf(pasta: str) -> int:
+    """Andre, 17/11/2026 (UTC DAVJV NOV26): o CSV da copart a Hapvida gera em fila e pode
+    nao estar pronto; o PDF oficial da mesma fatura ja' esta'. Sem o CSV na pasta, o XLSX
+    sai do PDF (pf.copart_pdf_para_linhas confere a soma com a fatura do proprio PDF; o
+    total x boleto e' a auditoria). Chegando o CSV depois, ele e' mais novo que o XLSX e o
+    XLSX e' refeito pelo CSV (gerar_xlsx_pasta)."""
+    nomes = arquivos(pasta)
+    csvs = {n.upper() for n in nomes if n.lower().endswith(".csv")}
+    gerados = 0
+    for nome in nomes:
+        up = nome.upper()
+        if not (up.startswith("RELATORIO_ANALITICO_COPARTICIPACAO_") and up.endswith(".PDF")) \
+                or up[:-4] + ".CSV" in csvs:
+            continue
+        origem, destino = os.path.join(pasta, nome), os.path.join(pasta, nome[:-4] + ".xlsx")
+        if not _desatualizado(origem, destino):
+            continue
+        try:
+            _pdf_copart_para_xlsx(origem, destino)
+            gerados += 1
+            log(f"xlsx {nome[:-4]}.xlsx: do PDF (CSV da Hapvida ainda não saiu)")
+        except Exception as e:
+            log(f"xlsx {nome} (do PDF): ERRO {e}")
+    return gerados
+
+
+def _pdf_copart_para_xlsx(origem: str, destino: str) -> None:
+    """XLSX da copart a partir do PDF oficial: cabecalho da fatura, uma linha por
+    atendimento, datas dd/mm/aaaa, valor numerico em reais, codigos/CPF como texto,
+    filtro, cabecalho congelado e linha de total."""
+    dados = pf.copart_pdf_para_linhas(origem)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Coparticipacao"
+    for i, l in enumerate(dados["cabecalho"]):
+        ws.append([l])
+        ws.cell(ws.max_row, 1).font = openpyxl.styles.Font(bold=True, size=12 if i == 0 else 11)
+    ws.append([])
+    ws.append(pf.COLUNAS_COPART_PDF)
+    linha_cab = ws.max_row
+    for c in ws[linha_cab]:
+        c.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+        c.fill = openpyxl.styles.PatternFill("solid", fgColor="1F4E78")
+    for r in dados["linhas"]:
+        ws.append([ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v for v in r])
+        i = ws.max_row
+        ws.cell(i, 7).number_format = ws.cell(i, 8).number_format = "dd/mm/yyyy"
+        ws.cell(i, 13).number_format = "#,##0.00"
+        for col in (2, 3, 4, 6, 9):
+            ws.cell(i, col).number_format = "@"
+    ws.append([])
+    ws.append(["TOTAL"] + [None] * 10 + [sum(r[11] for r in dados["linhas"]), dados["total"]])
+    for c in ws[ws.max_row]:
+        c.font = openpyxl.styles.Font(bold=True)
+    ws.cell(ws.max_row, 13).number_format = "#,##0.00"
+    ws.freeze_panes = ws.cell(linha_cab + 1, 1)
+    ws.auto_filter.ref = f"A{linha_cab}:M{linha_cab + len(dados['linhas'])}"
+    for col, w in zip("ABCDEFGHIJKLM", (38, 17, 11, 13, 38, 12, 13, 13, 13, 55, 34, 6, 12)):
+        ws.column_dimensions[col].width = w
+    wb.save(destino)
 
 
 def _csv_copart_para_xlsx(origem: str, destino: str) -> None:

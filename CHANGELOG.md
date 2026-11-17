@@ -2,6 +2,14 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## (próxima) 17/11/2026 — copart pelo PDF quando o CSV não saiu
+- **Faturamento: relatório de coparticipação sem o CSV da Hapvida** (André, 17/11: "se não tiver o .xlsx do copart disponível, baixar o .pdf e transformar em .xlsx"):
+  - a Hapvida gera o CSV da copart em fila; o PDF oficial da mesma fatura costuma já estar pronto (UTC DAVJV NOV26, fatura 300083551409, R$ 21.443,40);
+  - sem o CSV na pasta, o PDF vale como fonte: o XLSX sai dele (`pf.copart_pdf_para_linhas` + `fm._pdf_copart_para_xlsx`), uma linha por atendimento, com total;
+  - falha segura: linha que não reconhece, ou soma das linhas ≠ valor da fatura impresso no PDF, não gera XLSX; a auditoria confere o total do PDF com o boleto;
+  - chegando o CSV depois, o XLSX é refeito por ele.
+  - Teste: tests/teste_copart_pdf.py (na trava da publicação, lê o PDF real da pasta de faturas só leitura).
+
 ## (próxima) 08–09/11/2026 noite — auditoria "olhando tudo"
 - **Raspagem dos 37 contratos e do código da tela da Hapvida.** Achados:
   - existem 7 tipos de movimentação e a conferência só lia "Inclusion";
