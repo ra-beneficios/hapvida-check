@@ -57,6 +57,22 @@ ok("NFE_COPARTICIPACAO_DAVJV_NOV26.pdf" in faltas and "NFE_COPARTICIPACAO_DAVJV_
 _, faltas_errado, _ = cc.anexos_copart(pasta, "DAVJV", "NOV26", {"COPARTICIPACAO": {100.0}}, date(2026, 11, 3))
 ok(any("≠ boleto" in f for f in faltas_errado), "total diferente do boleto bloqueia")
 
+# --- Legado: só o PDF da copart na Troca de Arquivos (sem o CSV) - boleto e mês saem do PDF
+import glob  # noqa: E402
+import legado_auto  # noqa: E402
+Z8 = glob.glob("/sharepoint/faturas/*/Z8TUR/NOV26/RELATORIO_ANALITICO_COPARTICIPACAO_Z8TUR_NOV26.pdf")
+if Z8:
+    pdf = open(Z8[0], "rb").read()
+    arqs = {"EMPRESA_FM_Z8TUR_REMESSA_123_PSICO.PDF": pdf}
+    r = legado_auto.escolher_relatorios(arqs, "Z8TUR", 11, 2026)
+    ok(r["copart"].get("boletos") == {"1010745043073"} and r["copart"].get("pdf") == pdf and r["copart"].get("csv") is None,
+       "Legado sem o CSV: o PDF da copart do mês identifica o boleto da copart")
+    r = legado_auto.escolher_relatorios(arqs, "Z8TUR", 12, 2026)
+    ok(not r["copart"] and r["outros_meses"], "PDF da copart de outro mês não vale")
+    csv = open(Z8[0][:-4] + ".csv", "rb").read()
+    r = legado_auto.escolher_relatorios({**arqs, "EMPRESA_FM_PSICO_Z8TUR_REMESSA_123.CSV": csv}, "Z8TUR", 11, 2026)
+    ok(r["copart"].get("csv") == csv and not r["copart"].get("so_pdf"), "com o CSV na Troca, o CSV continua sendo a fonte")
+
 # --- e-mail
 corpo = cc.corpo_cliente(log[0], "DAVJV", "10/11/2026", [{"nome": "BOLETO_COPARTICIPACAO_DAVJV_NOV26.pdf", "descricao": "Boleto"}], "")
 ok("coparticipação" in corpo and "27/10/2026" in corpo and "10/11/2026" in corpo, "e-mail do cliente diz o que é e o vencimento")

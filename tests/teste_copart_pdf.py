@@ -39,6 +39,36 @@ ok(any(l[9] == "CONSULTA EM CONSULTORIO (NO HORARIO NORMAL OU PREESTABELECIDO)" 
 ok(any(l[9] == "CONSULTA MEDICA CONSULTORIO - PACOTE OFTALMOLOGIA (NDI SP)" for l in d["linhas"]),
    "quebra no meio da palavra (OFTALMOLOG|IA) colada")
 
+# --- Legado (17/11/2026): "Cod.Usuario", "Total.:", CPF sem o zero da frente, beneficiário repetido no topo
+# da página seguinte sem o cabeçalho, quebra de linha entre palavras, código solto no pé da página
+import glob  # noqa: E402
+Z8 = glob.glob("/sharepoint/faturas/*/Z8TUR/NOV26/RELATORIO_ANALITICO_COPARTICIPACAO_Z8TUR_NOV26.pdf")
+if Z8:
+    z = pf.copart_pdf_para_linhas(Z8[0])
+    ok(z["fatura"] == "1010745043073" and abs(z["total"] - 5003.96) < 0.01 and len(z["linhas"]) == 208,
+       f"Legado Z8TUR NOV26: 208 atendimentos, R$ 5.003,96 (leu {len(z['linhas'])}, {z['total']})")
+    ok(z["linhas"][0][3] == "05290365680", "CPF do Legado volta com o zero da frente")
+    ok(any(l[9] == "CONSULTA EM CONSULTORIO (NO HORARIO NORMAL OU PREESTABELECID" for l in z["linhas"]),
+       "quebra do Legado junta com espaço")
+    with open(Z8[0], "rb") as f:
+        ok(abs(pf.copart_pdf_para_linhas(f.read())["total"] - 5003.96) < 0.01, "lê o PDF em memória (Troca de Arquivos)")
+# AT2BC NOV26: descrição e prestador grudados com 1 espaço no texto corrido - a posição separa
+AT = glob.glob("/sharepoint/faturas/*/AT2BC/NOV26/RELATORIO_ANALITICO_COPARTICIPACAO_AT2BC_NOV26.pdf")
+if AT:
+    a = pf.copart_pdf_para_linhas(AT[0])["linhas"][0]
+    ok(a[9] == "CONSULTA EM CONSULTORIO (NO HORARIO NORMAL OU PREESTABELECIDO)" and a[10] == "CENTRO MED ADVENTISTA",
+       "procedimento e prestador separados pela posição (AT2BC)")
+# todo PDF de copart da pasta com o CSV oficial ao lado: o total lido do PDF = o total do CSV
+pares = [f for f in glob.glob("/sharepoint/faturas/*/*/*/RELATORIO_ANALITICO_COPARTICIPACAO_*.pdf") if os.path.exists(f[:-4] + ".csv")]
+ruins = []
+for f in pares:
+    try:
+        if abs(pf.copart_pdf_para_linhas(f)["total"] - (pf.total_relatorio_copart(f[:-4] + ".csv") or -1)) > 0.01:
+            ruins.append(os.path.basename(f))
+    except ValueError as e:
+        ruins.append(f"{os.path.basename(f)}: {e}")
+ok(len(pares) >= 20 and not ruins, f"{len(pares)} PDFs de copart (portal novo e Legado) batem com o CSV oficial {ruins[:3]}")
+
 # --- pasta sem CSV: o PDF é fonte, o XLSX sai dele e o total confere com o boleto
 with tempfile.TemporaryDirectory() as pasta:
     nome_pdf = os.path.basename(PDF)

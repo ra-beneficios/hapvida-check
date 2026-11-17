@@ -189,77 +189,118 @@ def conferir_valores(pasta: str, codigo: str, comp: str, plano: str, com_copart:
 
 COLUNAS_COPART_PDF = ["Titular", "Cód. Usuário", "Matrícula", "CPF", "Beneficiário", "Guia", "Data atendimento",
                       "Data (2ª)", "Cód. procedimento", "Procedimento", "Prestador", "Qtd", "Valor (R$)"]
-_RE_CP_FATURA = re.compile(r"^\s*(\d{9,})\s+(\d\d/\d\d/\d{4})\s+(-?[\d.]+,\d\d)\s*$")
-_RE_CP_PROC = re.compile(r"^\s*(\S+)\s+(\d\d/\d\d/\d{4})\s+(\d\d/\d\d/\d{4})\s+(\S+) - (.+?)\s{2,}(.+?)\s{2,}"
-                         r"(\d+)\s+(-?[\d.]+,\d\d)\s*$")
-_RE_CP_TOTAL = re.compile(r"^\s*Total:\s+(-?[\d.]+,\d\d)\s*$")
-_RE_CP_TITULAR = re.compile(r"^\s*([A-Z0-9]{5,})-(\S.*)$")
+_RE_CP_DATA = re.compile(r"^\d\d/\d\d/\d{4}$")
+_RE_CP_VALOR = re.compile(r"^-?[\d.]+,\d\d$")
+_RE_CP_PROC_DESC = re.compile(r"^(\d+) ?- ?(.*)$")      # portal novo "00010014 - CONSULTA"; Legado "00010014-CONSULTA"
+_RE_CP_TITULAR = re.compile(r"^\S+?-\S")                 # "DAVJV000063-NOME", Legado "2570-NOME", "1.249.890.000.0-NOME"
+_RE_CP_RODAPE = re.compile(r"^[A-Z0-9]{5,10}$")          # Legado: codigo solto no pe da pagina ("R29FJAP")
 _CP_CABECALHO_PAGINA = ("NOTRE DAME", "SISTEMA DE CONTROLE", "FATURA DE CO-PARTICIP", "HAPVIDA")
 
 
-def copart_pdf_para_linhas(caminho_pdf: str) -> dict:
-    """Le o PDF oficial 'FATURA DE CO-PARTICIPACAO' do portal novo (o mesmo do botao
-    'Relatorio de coparticipacao' da fatura) e devolve {'cabecalho': [3 linhas],
-    'fatura', 'vencimento', 'valor', 'linhas': [13 colunas de COLUNAS_COPART_PDF], 'total'}.
-    Falha segura (ValueError): linha que nao reconhece, beneficiario sem cabecalho, ou soma
-    das linhas diferente do valor da fatura impresso no PDF ou dos subtotais 'Total:'.
-    Criado 17/11/2026 (Andre, UTC DAVJV NOV26: CSV em fila na Hapvida, o PDF ja' estava pronto)."""
-    from datetime import datetime
+def _cp_linhas_pdf(caminho_pdf: str) -> list[list[tuple[float, str]]]:
+    """Cada pagina -> linhas (mesma altura, tolerancia 2pt) de campos [(x, texto)] na ordem da esquerda p/ direita.
+    O relatorio da Hapvida grava cada campo numa posicao propria; separar por espacos do texto corrido falha
+    (AT2BC NOV26: descricao e prestador grudados com 1 espaco)."""
     import pypdf
-    paginas = [p.extract_text(extraction_mode="layout") or "" for p in pypdf.PdfReader(caminho_pdf).pages]
+    out = []
+    for pagina in pypdf.PdfReader(io.BytesIO(caminho_pdf) if isinstance(caminho_pdf, bytes) else caminho_pdf).pages:
+        frags = []
+
+        def visita(texto, cm, tm, fonte, tamanho):
+            t = " ".join(texto.split())
+            if t:
+                frags.append((tm[5] * cm[3] + cm[5], tm[4] * cm[0] + cm[4], t))
+        pagina.extract_text(visitor_text=visita)
+        linhas: list[tuple[float, list]] = []
+        for y, x, t in sorted(frags, key=lambda f: (-f[0], f[1])):
+            if linhas and abs(linhas[-1][0] - y) <= 2:
+                linhas[-1][1].append((x, t))
+            else:
+                linhas.append((y, [(x, t)]))
+        out += [sorted(campos) for _, campos in linhas]
+    return out
+
+
+def copart_pdf_para_linhas(caminho_pdf: str) -> dict:
+    """Le o PDF oficial 'FATURA DE CO-PARTICIPACAO' (portal novo: o do botao 'Relatorio de coparticipacao' da
+    fatura; Legado: EMPRESA_FM_{COD}_REMESSA_n_PSICO.PDF da Troca de Arquivos) e devolve {'cabecalho': [3 linhas],
+    'fatura', 'vencimento', 'valor', 'linhas': [13 colunas de COLUNAS_COPART_PDF], 'total'}.
+    Falha segura (ValueError): linha que nao reconhece, atendimento sem beneficiario, ou soma das linhas diferente
+    do valor da fatura impresso no PDF ou dos subtotais 'Total:'.
+    Criado 17/11/2026 (Andre, UTC DAVJV NOV26: CSV em fila na Hapvida, o PDF ja' estava pronto); Legado no mesmo dia."""
+    from datetime import datetime
     empresa, fatura, linhas, subtotais = None, None, [], []
-    titular, usuario, espera_usuario, col_desc, col_prestador = None, None, False, None, None
-    for texto in paginas:
-        for l in texto.splitlines():
-            s = l.strip()
-            if not s or s.upper().startswith(_CP_CABECALHO_PAGINA) or "PAGINA -" in s.upper():
-                continue
-            if s.startswith("Cod. Usuario"):
-                espera_usuario = True
-                continue
-            if espera_usuario:
-                espera_usuario = False
-                partes = re.split(r"\s{2,}", s)
-                cpf = next((t for t in partes[1:] if re.fullmatch(r"\d{11}", t)), "")
-                meio = [t for t in partes[1:-1] if t != cpf]
-                usuario = (partes[0], meio[0] if meio else "", cpf, partes[-1] if len(partes) > 1 else "")
-                continue
-            m = _RE_CP_FATURA.match(l)
-            if m:
-                if fatura and fatura[0] != m.group(1):
-                    raise ValueError(f"PDF com duas faturas ({fatura[0]} e {m.group(1)})")
-                fatura = m.groups()
-                continue
-            m = _RE_CP_PROC.match(l)
-            if m:
-                if not usuario:
-                    raise ValueError(f"atendimento sem beneficiário: {s[:80]}")
-                g = m.groups()
-                linhas.append([titular, *usuario, g[0], datetime.strptime(g[1], "%d/%m/%Y"),
-                               datetime.strptime(g[2], "%d/%m/%Y"), g[3], g[4], g[5], int(g[6]), _float_br(g[7])])
-                col_desc, col_prestador = m.start(4), m.start(6)  # a quebra alinha com o codigo do procedimento
-                continue
-            m = _RE_CP_TOTAL.match(l)
-            if m:
-                subtotais.append(_float_br(m.group(1)))
-                continue
-            if s == empresa:
-                continue  # repete no topo de cada pagina
-            if empresa is None and _RE_CP_TITULAR.match(l):
-                empresa = s
-                continue
-            if _RE_CP_TITULAR.match(l):
-                if s != titular:  # titular repetido no topo da pagina seguinte: mesmo beneficiario
-                    titular, usuario = s, None
-                continue
-            inicio = len(l) - len(l.lstrip())
-            if linhas and col_desc is not None and inicio >= col_desc - 6:
-                # descricao/prestador quebrado em 2 linhas no PDF (colado: a Hapvida corta no meio da palavra)
-                linhas[-1][10 if inicio >= col_prestador - 6 else 9] += s
-                continue
-            raise ValueError(f"linha que não sei ler no PDF de coparticipação: {s[:80]}")
+    titular, usuario, cols_usuario, espera_usuario, x_desc, x_prest, legado = None, None, None, False, None, None, False
+    todas = _cp_linhas_pdf(caminho_pdf)
+
+    def _eh_atendimento(t):
+        return (len(t) >= 6 and _RE_CP_DATA.match(t[1]) and _RE_CP_DATA.match(t[2]) and _RE_CP_PROC_DESC.match(t[3])
+                and _RE_CP_VALOR.match(t[-1]) and t[-2].isdigit())
+    # coluna do prestador = a posicao mais comum do campo antes da quantidade (a descricao as vezes vem em 2
+    # pedacos na mesma linha - DAVJV NOV26 "...CONSULTORIO -" + "PACOTE OFTALMOLOGIA (NDI SP)")
+    from collections import Counter
+    xs = Counter(round(c[-3][0]) for c in todas if _eh_atendimento([t for _, t in c]))
+    x_prest_col = xs.most_common(1)[0][0] if xs else None
+    for campos in todas:
+        textos = [t for _, t in campos]
+        junto = " ".join(textos)
+        primeiro = textos[0]
+        if primeiro.upper().startswith(_CP_CABECALHO_PAGINA) or any(k in junto.upper() for k in ("PAGINA -", "DATA -", "HORA -")):
+            continue
+        if primeiro.startswith(("Cod. Usuario", "Cod.Usuario")):
+            cols_usuario, espera_usuario = [x for x, _ in campos], True
+            legado = primeiro.startswith("Cod.Usuario")
+            continue
+        if espera_usuario:
+            espera_usuario = False
+            vals = ["", "", "", ""]
+            for x, t in campos:  # cada campo na coluna do cabecalho mais proxima
+                i = min(range(len(cols_usuario)), key=lambda k: abs(cols_usuario[k] - x))
+                vals[min(i, 3)] = (vals[min(i, 3)] + " " + t).strip()
+            cpf = re.sub(r"\D", "", vals[2])
+            usuario = (vals[0], vals[1], cpf.zfill(11) if cpf else "", vals[3])  # Legado tira o zero da frente
+            continue
+        if usuario and primeiro == usuario[0] and not _RE_CP_DATA.match(textos[1] if len(textos) > 1 else ""):
+            continue  # Legado: beneficiario repetido no topo da pagina seguinte, sem o cabecalho
+        if len(textos) == 3 and re.fullmatch(r"\d{9,}", textos[0]) and _RE_CP_DATA.match(textos[1]) and _RE_CP_VALOR.match(textos[2]):
+            if fatura and fatura[0] != textos[0]:
+                raise ValueError(f"PDF com duas faturas ({fatura[0]} e {textos[0]})")
+            fatura = tuple(textos)
+            continue
+        if _eh_atendimento(textos):
+            if not usuario:
+                raise ValueError(f"atendimento sem beneficiário: {junto[:80]}")
+            cod, desc = _RE_CP_PROC_DESC.match(textos[3]).groups()
+            meio = campos[4:-2]
+            corte = x_prest_col - 5 if x_prest_col is not None else None
+            desc = " ".join([desc] + [t for x, t in meio if corte is not None and x < corte])
+            prest = " ".join(t for x, t in meio if corte is None or x >= corte)
+            x_desc, x_prest = campos[3][0], x_prest_col
+            linhas.append([titular, *usuario, textos[0], datetime.strptime(textos[1], "%d/%m/%Y"),
+                           datetime.strptime(textos[2], "%d/%m/%Y"), cod, desc, prest, int(textos[-2]),
+                           _float_br(textos[-1])])
+            continue
+        if primeiro.startswith("Total") and _RE_CP_VALOR.match(textos[-1]):
+            subtotais.append(_float_br(textos[-1]))
+            continue
+        if linhas and x_desc is not None and campos[0][0] >= x_desc - 5 and not any(_RE_CP_VALOR.match(t) for t in textos):
+            # descricao/prestador que quebrou em 2 linhas. Portal novo corta no meio da palavra (cola);
+            # Legado quebra entre palavras
+            for x, t in campos:
+                i = 10 if x_prest is not None and x >= x_prest - 5 else 9
+                linhas[-1][i] += (" " if legado else "") + t
+            continue
+        if len(textos) == 1 and _RE_CP_TITULAR.match(primeiro):
+            if empresa is None and fatura is None:
+                empresa = primeiro
+            elif primeiro != titular and primeiro != empresa:  # titular repetido na pagina seguinte: mesmo beneficiario
+                titular, usuario = primeiro, None
+            continue
+        if len(textos) == 1 and _RE_CP_RODAPE.match(primeiro):
+            continue
+        raise ValueError(f"linha que não sei ler no PDF de coparticipação: {junto[:80]}")
     if not fatura or not linhas:
-        raise ValueError("PDF sem fatura ou sem atendimentos (não é o relatório de coparticipação do portal novo)")
+        raise ValueError("PDF sem fatura ou sem atendimentos (não é o relatório de coparticipação da Hapvida)")
     total = round(sum(x[12] for x in linhas), 2)
     valor = _float_br(fatura[2])
     if abs(total - valor) > TOLERANCIA or abs(round(sum(subtotais), 2) - total) > TOLERANCIA:

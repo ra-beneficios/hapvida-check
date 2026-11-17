@@ -1,6 +1,9 @@
 """
 Complemento automático da coparticipação (André, 17/11/2026: "diária do 27 ao 10, complemento automático").
 
+Portal novo e Legado (Saúde do Legado: Z8TUR, L&H ERQ43/ICBJY — copart = 2º boleto do mês no status diário das
+06:30, legado_auto --status; documentos pela Troca de Arquivos/Bemobi/DANFSe, legado_auto.baixar_contrato).
+
 A Hapvida às vezes emite a fatura de coparticipação DEPOIS que o faturamento do contrato já foi enviado ao cliente
 (NOV26: DAVJV R$ 21.443,40 apareceu ~30/10, X98VE e YXF01 também — os três saíram em 27/10 sem a copart, e o motor
 não voltava em grupo já enviado). Esta rotina roda todo dia, do dia 27 ao dia 10:
@@ -59,7 +62,17 @@ def pendentes(log_envios: list[dict], saude: dict[str, set[str]]) -> list[tuple[
     return out
 
 
-def anexos_copart(pasta: str, cod: str, comp: str, valores: dict, hoje: date):
+def copart_legado(comp: str) -> dict[str, dict]:
+    """Saúde do Legado com copart na competência: 2 ou mais boletos do mês no status (mensalidade + copart) - a
+    mesma regra do envio do mês (envio_faturamento.checar_grupo). codigo -> {"empresa", "valores"}."""
+    legado = fm.contratos_legado()
+    mods = fm.modalidades(set(legado)) if legado else {}
+    st = fm.status_legado(comp)
+    return {c: {"empresa": legado[c], "valores": st[c]["valores"]} for c in legado
+            if pf.PLANO_DA_MODALIDADE.get(mods.get(c)) == "SAUDE" and c in st and len(st[c]["boletos"]) >= 2}
+
+
+def anexos_copart(pasta: str, cod: str, comp: str, valores, hoje: date):
     """(anexos, faltas, pendencias) só da copart, com as checagens do envio do mês."""
     nomes = fm.arquivos(pasta)
     esperados = [n for n in pf.esperados(cod, comp, "SAUDE", True) if "_COPARTICIPACAO_" in n]
@@ -102,6 +115,15 @@ def _venc_copart(conn, cod: str, comp: str) -> str | None:
                     (cod, mes, ano))
         v = cur.fetchone()[0]
     return v.strftime("%d/%m/%Y") if v else None
+
+
+def _venc_pdf(pasta: str, cod: str, comp: str) -> str | None:
+    """Legado não tem a fatura no banco: o vencimento sai do analítico oficial (PDF)."""
+    caminho = os.path.join(pasta, pf.nome("RELATORIO_ANALITICO", "COPARTICIPACAO", cod, comp, "pdf"))
+    try:
+        return pf.copart_pdf_para_linhas(caminho)["vencimento"] if os.path.exists(caminho) else None
+    except ValueError:
+        return None
 
 
 def corpo_cliente(orig: dict, cod: str, venc: str, meta: list[dict], zip_aviso: str) -> str:
@@ -157,7 +179,8 @@ def main():
         return
     log_envios = json.load(open(caminho_log, encoding="utf-8"))
     saude = fm.contratos_saude(comp)
-    lista = pendentes(log_envios, saude)
+    legado = {c: v for c, v in copart_legado(comp).items() if c not in saude}
+    lista = pendentes(log_envios, {**saude, **{c: {"SAUDE", "COPARTICIPACAO"} for c in legado}})
     ef.log(f"complemento copart {comp}: {len(lista)} contrato(s) com copart emitida depois do envio"
            + (f" ({', '.join(c for c, _ in lista)})" if lista else ""))
     if not lista:
@@ -166,21 +189,44 @@ def main():
     project = os.environ["GCP_PROJECT"]
     creds = {"carol": fm.scraper.get_credentials(project, "hapvida-portal-saude"),
              "marco": fm.scraper.get_credentials(project, "hapvida-portal-saude")}  # as duas = Cora (15/10/2026)
-    try:
-        avisos = fm.baixar_documentos_saude({c: saude[c] for c, _ in lista}, comp, "completo", creds)
-    except Exception as e:
-        avisos = {}
-        ef.log(f"complemento copart: download falhou ({e}) - confere o que já estiver na pasta")
+    avisos = {}
+    do_portal_novo = {c: saude[c] for c, _ in lista if c in saude}
+    if do_portal_novo:
+        try:
+            avisos = fm.baixar_documentos_saude(do_portal_novo, comp, "completo", creds)
+        except Exception as e:
+            ef.log(f"complemento copart: download do portal novo falhou ({e}) - confere o que já estiver na pasta")
+    do_legado = [c for c, _ in lista if c in legado]
+    if do_legado:
+        import legado_auto
+        mes, ano = fm.competencia_para_mes(comp)
+        assumidos, creds_legado = fm.legado_assumido(fm.contratos_legado())
+        for c in do_legado:
+            if c not in assumidos:
+                avisos[c] = ["sem credencial válida do Legado no Bitwarden"]
+                continue
+            try:
+                r = legado_auto.baixar_contrato(c, legado[c]["empresa"], creds_legado[c], comp, mes, ano,
+                                                fm.pasta_contrato(c, comp, legado[c]["empresa"]), "SAUDE")
+                avisos[c] = r.get("avisos") or []
+            except Exception as e:
+                avisos[c] = [f"download do Legado falhou: {e}"]
     for c, _ in lista:
-        fm.gerar_xlsx_pasta(fm.pasta_contrato(c, comp))
+        fm.gerar_xlsx_pasta(fm.pasta_contrato(c, comp, legado[c]["empresa"]) if c in legado else fm.pasta_contrato(c, comp))
 
     conn = psycopg2.connect(dbname="lifetools")
     token, enviados, bloqueados = None, [], []
     for cod, orig in lista:
-        pasta = fm.pasta_contrato(cod, comp)
-        anexos, faltas, pendencias = anexos_copart(pasta, cod, comp, fm.valores_saude(cod, comp), hoje)
+        if cod in legado:
+            pasta = fm.pasta_contrato(cod, comp, legado[cod]["empresa"])
+            valores = legado[cod]["valores"]  # boletos do mês no status (o total tem que bater com um deles)
+        else:
+            pasta, valores = fm.pasta_contrato(cod, comp), fm.valores_saude(cod, comp)
+        anexos, faltas, pendencias = anexos_copart(pasta, cod, comp, valores, hoje)
         emails = _emails(conn, orig["codigos"].split("+"))
-        venc = _venc_copart(conn, cod, comp)
+        venc = _venc_copart(conn, cod, comp) or _venc_pdf(pasta, cod, comp)
+        if not venc:
+            faltas.append("vencimento da coparticipação não encontrado")
         if not emails:
             faltas.append("sem e-mail cadastrado")
         envio, zip_aviso, nz = ef.preparar_anexos(anexos, cod, comp) if anexos else ([], "", None)

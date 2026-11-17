@@ -16,6 +16,11 @@ Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifeto
   - manda ao cliente só a copart, para os contatos do grupo, e registra em ENVIOS_<COMP>.json (status "complemento"); o time interno recebe aviso quando sai e, no dia 10, do que ainda não saiu;
   - NOV26: os 3 contratos registrados como complemento manual (André já mandou).
   - Teste: tests/teste_complemento_copart.py (na trava).
+- **Copart do Legado, o mesmo** (André, 17/11: "faz o mesmo para a copart do Legado"):
+  - leitor do PDF refeito pela posição de cada campo na página (antes era pelo texto corrido): lê o formato do portal novo e o do Legado (Cod.Usuario, Total.:, CPF sem o zero da frente, beneficiário repetido no topo da página, código no pé da página), e separa descrição e prestador grudados (AT2BC);
+  - conferido com os 26 pares PDF×CSV oficiais das pastas: 2.299 atendimentos iguais em guia, prestador e valor;
+  - Troca de Arquivos sem o CSV da copart do mês: o PDF da mesma remessa diz o boleto da copart e o vencimento; o XLSX sai dele;
+  - complemento automático também para a Saúde do Legado (copart = 2º boleto do mês no status diário), baixando por `legado_auto.baixar_contrato`.
 
 ## (próxima) 08–09/11/2026 noite — auditoria "olhando tudo"
 - **Raspagem dos 37 contratos e do código da tela da Hapvida.** Achados:

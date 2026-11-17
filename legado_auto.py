@@ -241,6 +241,22 @@ def escolher_relatorios(arqs: dict[str, bytes], codigo: str, mes: int, ano: int)
         if tipo == "copart":
             res[tipo]["boletos"] = set(re.findall(rb'^"(\d{10,})";', arqs[nome], re.M))
             res[tipo]["boletos"] = {b.decode() for b in res[tipo]["boletos"]}
+    if not res["copart"]:
+        # 17/11/2026 (Andre): sem o CSV da copart do mes, o PDF da mesma remessa vale - o numero da fatura e o
+        # vencimento saem do proprio PDF (pf.copart_pdf_para_linhas confere a soma); o XLSX sai dele depois.
+        pdfs = [n for n in arqs if re.fullmatch(rf"EMPRESA_FM_{cod}_REMESSA_\d+_PSICO\.PDF", n.upper())]
+        for nome in sorted(pdfs, key=_remessa, reverse=True):
+            try:
+                d = pf.copart_pdf_para_linhas(arqs[nome])
+            except ValueError as e:
+                log(f"{codigo}: PDF de coparticipação {nome} não lido ({e})")
+                continue
+            dia, m, a = (int(x) for x in d["vencimento"].split("/"))
+            if (m, a) != (mes, ano):
+                res["outros_meses"].append(nome)
+                continue
+            res["copart"] = {"csv": None, "pdf": arqs[nome], "boletos": {d["fatura"]}, "so_pdf": True}
+            break
     return res
 
 
@@ -411,6 +427,8 @@ def baixar_contrato(codigo: str, empresa: str, cred: dict, comp: str, mes: int, 
                             res["gravados"].append(f"RELATORIO_ANALITICO_{p}.{ext}")
                     if not r.get("pdf"):
                         res["avisos"].append(f"analítico {p}: CSV sem o PDF da mesma remessa")
+                    if r.get("so_pdf"):
+                        res["avisos"].append(f"analítico {p}: só o PDF na Troca de Arquivos (sem o CSV) - XLSX feito do PDF")
 
             # 5. lista de ativos
             if precisa("LISTA_ATIVOS", plano, "csv"):
