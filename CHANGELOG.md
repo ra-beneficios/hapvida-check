@@ -9,6 +9,13 @@ Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifeto
   - falha segura: linha que não reconhece, ou soma das linhas ≠ valor da fatura impresso no PDF, não gera XLSX; a auditoria confere o total do PDF com o boleto;
   - chegando o CSV depois, o XLSX é refeito por ele.
   - Teste: tests/teste_copart_pdf.py (na trava da publicação, lê o PDF real da pasta de faturas só leitura).
+- **Complemento automático da coparticipação** (André, 17/11: "diária do 27 ao 10, complemento automático"):
+  - a Hapvida às vezes emite a copart depois do envio do mês (NOV26: DAVJV, X98VE, YXF01 saíram em 27/10 sem ela) e o motor não voltava em grupo já enviado;
+  - `complemento_copart.py` (cron 08:30, dias 27–31 e 1–10) acha contrato enviado sem a copart, baixa os documentos e confere como o envio do mês (lista fechada, total = boleto, relatório do mês);
+  - a NF que não saiu segura até o dia 4; do dia 5 ao 10 o arquivo vai sem ela, como pendência;
+  - manda ao cliente só a copart, para os contatos do grupo, e registra em ENVIOS_<COMP>.json (status "complemento"); o time interno recebe aviso quando sai e, no dia 10, do que ainda não saiu;
+  - NOV26: os 3 contratos registrados como complemento manual (André já mandou).
+  - Teste: tests/teste_complemento_copart.py (na trava).
 
 ## (próxima) 08–09/11/2026 noite — auditoria "olhando tudo"
 - **Raspagem dos 37 contratos e do código da tela da Hapvida.** Achados:
