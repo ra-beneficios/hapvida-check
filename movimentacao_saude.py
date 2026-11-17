@@ -128,6 +128,7 @@ def enviar_movimentacao(usuario: str, senha: str, codigo_contrato: str, arquivo_
 
         _localizar_e_entrar_no_contrato(page, codigo_contrato)
 
+        anexou = False
         try:
             page.click("text=Movimentações")
             page.wait_for_timeout(1500)
@@ -160,6 +161,7 @@ def enviar_movimentacao(usuario: str, senha: str, codigo_contrato: str, arquivo_
             page.wait_for_load_state("networkidle", timeout=15000)
             page.wait_for_timeout(1500)
 
+            anexou = True        # daqui em diante o arquivo pode ter chegado: falha = INCERTO (o vigia confere)
             page.set_input_files("input[type=file]", arquivo_txt_path)
             page.wait_for_timeout(3000)
             page.wait_for_load_state("networkidle", timeout=15000)
@@ -203,6 +205,12 @@ def enviar_movimentacao(usuario: str, senha: str, codigo_contrato: str, arquivo_
                     f.write(page.url + "\n\n" + page.locator("body").inner_text())
             except Exception:
                 pass
+            if not anexou:
+                # 17/11/2026 (MOV-36/MOV-37, 14:58: "Nova movimentação" não apareceu): nada foi anexado — o arquivo
+                # não saiu. Marcado como "antes do arquivo", o registro vira FALHOU_UPLOAD e a nova tentativa não é
+                # barrada como "mesmo arquivo" (ficava ENVIANDO/INCERTO e bloqueava por 2 h).
+                import sys
+                sys.exc_info()[1].antes_do_arquivo = True
             raise
 
         browser.close()
@@ -225,7 +233,12 @@ def run_inclusao(project: str, codigo_contrato: str, arquivo_txt_path: str) -> d
     eid = portal_envio.antes(codigo_contrato, arquivo_txt_path)   # levanta portal_envio.Duplicado nos tipos que bloqueiam
     secret_id = "hapvida-portal-saude-marco" if codigo_contrato.upper() in CONTRATOS_CONTA_MARCO else "hapvida-portal-saude"
     creds = get_credentials(project, secret_id)
-    resultado = enviar_movimentacao(creds["usuario"], creds["senha"], codigo_contrato, arquivo_txt_path)
+    try:
+        resultado = enviar_movimentacao(creds["usuario"], creds["senha"], codigo_contrato, arquivo_txt_path)
+    except Exception as e:
+        if getattr(e, "antes_do_arquivo", False):
+            portal_envio.depois(eid, {"erro": f"antes de anexar o arquivo: {type(e).__name__}: {e}"[:400]})
+        raise
     portal_envio.depois(eid, resultado)
     return resultado
 
