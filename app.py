@@ -633,6 +633,24 @@ def mov_legado_situacao(p: LegadoSituacao):
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
+class CadastroCertificado(BaseModel):
+    cpfs: list[str]
+
+
+@app.post("/legado/cadastro-certificado")
+def legado_cadastro_certificado(p: CadastroCertificado):
+    """17/11/2026 (André, MOV-15): nome, nascimento e mãe que a Hapvida tem certificados para o CPF (o que o Legado
+    preenche ao digitar o CPF). Só leitura. -> {"cadastro": {cpf: {...} | null}}"""
+    import legado_cadastro
+    import odonto_premium
+    try:
+        return {"cadastro": legado_cadastro.consultar(p.cpfs)}
+    except odonto_premium.SessaoLegado as e:
+        raise HTTPException(status_code=428, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 class AnexarDocumento(BaseModel):
     contrato: str
     pedido: str
