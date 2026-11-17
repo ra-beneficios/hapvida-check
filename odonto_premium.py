@@ -163,6 +163,26 @@ def _mae_completa(page, sel, mae):
                   [sel, mae])
 
 
+def cidade_do_cep(resposta: dict | None) -> dict | None:
+    """Resposta do AjaxCepConsulta do Legado -> {cidade, uf} (o que a ficha preenche pelo CEP) ou None."""
+    c = next(iter((resposta or {}).get("cep") or []), None)
+    if not c or not (c.get("cidade") or "").strip() or not (c.get("uf") or "").strip():
+        return None
+    return {"cidade": " ".join(c["cidade"].split()).upper(), "uf": c["uf"].strip().upper()}
+
+
+def _espera_cep(page, acao) -> dict | None:
+    """Sai do CEP e espera o Legado preencher cidade/UF pela base de CEP dele (AjaxCepConsulta, até 20 s)."""
+    try:
+        with page.expect_response(lambda r: "AjaxCepConsulta" in r.url, timeout=20000) as resp:
+            acao()
+        dados = cidade_do_cep(json.loads(resp.value.body().decode("latin-1") or "{}"))
+    except Exception:
+        dados = None
+    page.wait_for_timeout(1000)
+    return dados
+
+
 def _espera_neoway(page, acao) -> dict | None:
     """08/11/2026 (auditoria, MOV-000014 l.11 HELLOÁ): ao sair do CPF o Legado consulta a base dele
     (AjaxRetornaDadosCpfNeoway) e PREENCHE nome/nascimento/mãe — é por isso que o manual não trava. O robô esperava 3,5 s
@@ -227,12 +247,16 @@ def _titular(page, menu: str, f: dict, html: Path) -> str:
     page.select_option("#pPlano", PLANO)
     page.click("#pCep")
     page.keyboard.type(f["cep"])
-    page.keyboard.press("Tab")
-    page.wait_for_timeout(3000)
+    pelo_cep = _espera_cep(page, lambda: page.keyboard.press("Tab"))
     page.select_option("#pLogradouro", f["tlog"])
-    for k in ("pEndereco", "pNumero", "pCompl", "pBairro", "pCidade"):
+    for k in ("pEndereco", "pNumero", "pCompl", "pBairro"):
         page.fill("#" + k, (f.get(k) or "")[:60])
-    page.select_option("#pUf", f["pUf"])
+    # 17/11/2026 (André, MOV-36: "o titular está no layout e mesmo assim não inclui o dependente"): 12 titulares
+    # recusados com "040-Cep endereço não é válido" — o município (129) da planilha era de outra cidade (Ramon: CEP
+    # 24800-161 Itaboraí com 320530 Vitória/ES; Itabela/BA, Cubatão/SP...) e o robô escrevia por cima da cidade que o
+    # Legado acabara de preencher pelo CEP. A cidade e a UF do CEP (do próprio Legado) valem; a nossa só sem resposta.
+    page.fill("#pCidade", ((pelo_cep or {}).get("cidade") or f.get("pCidade") or "")[:60])
+    page.select_option("#pUf", (pelo_cep or {}).get("uf") or f["pUf"])
     page.evaluate("""() => { const o = document.querySelector('[name=pOrgao]'), u = document.querySelector('[name=pUfOrgao]');
         const m = (o && o.value || '').toUpperCase().match(/(AC|AL|AM|AP|BA|CE|DF|ES|GO|MA|MG|MS|MT|PA|PB|PE|PI|PR|RJ|RN|RO|RR|RS|SC|SE|SP|TO)$/);
         if (m && u && !u.value) u.value = m[1]; }""")
