@@ -798,5 +798,7 @@ def inclusao_consultar_cpfs(p: ConsultarCpfs):
         return r
     except Exception as e:
         print(f"[inclusao/consultar-cpfs] {contrato}: sem consulta ao vivo: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=409, detail=f"sem acesso ao contrato {contrato} pela API da Hapvida")
+        # 18/11/2026 (MOV-24: um Timeout de 20 s aparecia como "sem acesso ao contrato 8DAC9" e parecia perda de acesso)
+        motivo = ("o portal não respondeu a tempo" if "Timeout" in type(e).__name__ else f"{type(e).__name__}: {e}"[:200])
+        raise HTTPException(status_code=409, detail=f"sem consulta ao vivo do contrato {contrato}: {motivo}")
 
