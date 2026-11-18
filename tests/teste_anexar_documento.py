@@ -48,9 +48,9 @@ class Anexar(unittest.TestCase):
         self.assertEqual(up.kwargs["data"], {"holderControlNumber": "69000001", "type": CONJ, "holderDocumentNumber": T})
         self.assertEqual(up.kwargs["files"]["file"][0], "DOCUMENTO_COMPROBATORIO_-Certidao.pdf", "sem acento, com o espaço")
         corpo = conf.kwargs["json"]
-        self.assertEqual(corpo["holder"]["controlCode"], 69000001)
+        self.assertEqual(corpo["holder"]["controlCode"], "69000001")
         self.assertEqual([a["fileName"] for a in corpo["holder"]["attachments"]], ["ds.pdf"], "os anexos de antes vão junto")
-        self.assertEqual(corpo["dependents"], [{"controlCode": 69000002, "attachments": [
+        self.assertEqual(corpo["dependents"], [{"controlCode": "69000002", "attachments": [
             {"documentType": CONJ, "fileName": "DOCUMENTO_COMPROBATORIO_-Certidao.pdf", "name": "Certidao.pdf",
              "path": "p/novo", "type": "application/pdf"}]}], "o arquivo novo vem da resposta do upload, como na tela")
         self.assertEqual(r["faltam"], [])

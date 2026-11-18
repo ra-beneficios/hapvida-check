@@ -143,8 +143,10 @@ def confirmacao(requeridos: list[dict], pedido: str) -> dict:
     """O corpo do POST required-documents: titular e dependentes, cada um com TODOS os anexos dele."""
     tit = next((r for r in requeridos if str(r.get("type") or "").lower() in ("titular", "holder")), None)
     deps = [r for r in requeridos if r is not tit]
-    return {"holder": {"controlCode": int((tit or {}).get("controlNumber") or pedido), "attachments": _anexos((tit or {}).get("documents"))},
-            "dependents": [{"controlCode": d.get("controlNumber"), "attachments": _anexos(d.get("documents"))} for d in deps]}
+    # 18/11/2026 (MOV-45, pedido 70251052): a Hapvida passou a recusar o número como inteiro — 400 "$.holder.controlCode:
+    # could not be converted to System.String" (o anexo subia e a confirmação falhava). Vai como texto, como a tela.
+    return {"holder": {"controlCode": str((tit or {}).get("controlNumber") or pedido), "attachments": _anexos((tit or {}).get("documents"))},
+            "dependents": [{"controlCode": str(d.get("controlNumber") or ""), "attachments": _anexos(d.get("documents"))} for d in deps]}
 
 
 def _com_o_novo(req: list[dict], vida_cn, tipo: str, c: dict) -> list[dict]:
