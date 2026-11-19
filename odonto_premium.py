@@ -78,7 +78,7 @@ def _login(page, cod: str, sessao: dict | None = None) -> str:
     page.wait_for_timeout(2000)
     # 03/11/2026 (legado_captcha_premium): a URL de recusa também tem pIdSessao= — antes "entrava" e quebrava com 500
     if "CAPTCHA" in page.content().upper() or "InclusaoContratoCpf" not in page.content():
-        raise SessaoLegado(f"o login do Legado ({cod}) recusou o robô (captcha): precisa da sessão colada na tela")
+        raise SessaoLegado(f"o login do Legado ({cod}) recusou a Cora (captcha): precisa da sessão colada na tela")
     return page.url
 
 
