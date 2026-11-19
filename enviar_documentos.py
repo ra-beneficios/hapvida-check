@@ -239,18 +239,34 @@ def _buscar_faturas_contrato(codigo: str) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT DISTINCT ON (bill_type) billing_number, numero, bill_type, vencimento, valor,
+                SELECT billing_number, numero, bill_type, vencimento, valor,
                        person_number, remittence
                 FROM faturas f JOIN empresa_operadora_codigos eoc ON eoc.id = f.empresa_operadora_codigo_id
-                WHERE eoc.codigo_externo = %s
+                WHERE eoc.codigo_externo = %s AND vencimento IS NOT NULL
                 ORDER BY bill_type, vencimento DESC
                 """,
                 (codigo,),
             )
             cols = ["billing_number", "numero", "bill_type", "vencimento", "valor", "person_number", "remittence"]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
+            return escolher_faturas_do_mes([dict(zip(cols, row)) for row in cur.fetchall()])
     finally:
         conn.close()
+
+
+def escolher_faturas_do_mes(faturas: list[dict]) -> list[dict]:
+    """Mês = o da mensalidade mais recente; de cada tipo, a mais recente QUE VENCE NESSE MÊS.
+    19/11/2026 (MID YXF01, UTC DAVJV, THREENG X98VE): pegar a mais recente de cada tipo e só depois filtrar
+    o mês perdia a copart de novembro assim que a Hapvida emitia a de dezembro (vence 10/12) - o boleto
+    da copart de novembro nunca era baixado."""
+    if not faturas:
+        return []
+    mens = [f for f in faturas if f["bill_type"] == "MENSALIDADE PLANO SAUDE"]
+    ref = max(f["vencimento"] for f in (mens or faturas))
+    escolhidas: dict[str, dict] = {}
+    for f in sorted(faturas, key=lambda f: f["vencimento"], reverse=True):
+        if (f["vencimento"].year, f["vencimento"].month) == (ref.year, ref.month):
+            escolhidas.setdefault(f["bill_type"], f)
+    return list(escolhidas.values())
 
 
 def _empresa_nome(codigo: str) -> str:
@@ -378,8 +394,7 @@ def montar_e_enviar(
     # mais recente de cada tipo; copart de mes anterior (contrato sem copart no
     # mes) iria parar na pasta do mes da mensalidade. Fica so' o que vence no
     # mesmo mes da mensalidade.
-    ref = next((f for f in faturas if f["bill_type"] == "MENSALIDADE PLANO SAUDE"), faturas[0])["vencimento"]
-    faturas = [f for f in faturas if (f["vencimento"].year, f["vencimento"].month) == (ref.year, ref.month)]
+    # (19/11/2026: a escolha do mês agora é feita em escolher_faturas_do_mes, antes de pegar a mais recente)
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()

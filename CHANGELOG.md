@@ -2,6 +2,12 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## (próxima) 19/11/2026 — copart do mês não baixava quando a do mês seguinte já existia
+- **Download do portal novo** (MID YXF01, UTC DAVJV, THREENG X98VE; André viu o boleto de copart em aberto na MID e fora da pasta):
+  - a busca pegava a fatura mais recente de cada tipo e só depois filtrava o mês da mensalidade; com a copart de dezembro (vence 10/12) emitida, a de novembro sumia e nenhum boleto de copart era baixado — nem pelo faturamento, nem pelo complemento;
+  - agora: mês = o da mensalidade mais recente; de cada tipo, a mais recente que vence nesse mês (`enviar_documentos.escolher_faturas_do_mes`).
+  - Teste: tests/teste_faturas_do_mes.py (na trava da publicação).
+
 ## (próxima) 17/11/2026 — copart pelo PDF quando o CSV não saiu
 - **Faturamento: relatório de coparticipação sem o CSV da Hapvida** (André, 17/11: "se não tiver o .xlsx do copart disponível, baixar o .pdf e transformar em .xlsx"):
   - a Hapvida gera o CSV da copart em fila; o PDF oficial da mesma fatura costuma já estar pronto (UTC DAVJV NOV26, fatura 300083551409, R$ 21.443,40);
