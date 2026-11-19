@@ -44,7 +44,13 @@ ok("X98VE" not in [c for c, _ in p], "complemento já feito (inclusive manual) n
 ok("KGBQY" not in [c for c, _ in p], "grupo ainda não enviado fica com o envio do mês")
 
 # --- arquivos: pasta real da UTC NOV26 (tem o analítico da copart, não tem boleto/NF da copart)
-pasta = "/sharepoint/faturas/UTC OLEO E GAS ENGENHARIA S.A./DAVJV/NOV26"
+# cópia da pasta sem o boleto/NF da copart (19/11/2026: a pasta real ganhou o boleto; o teste não pode depender disso)
+import os, shutil, tempfile  # noqa: E402,E401
+_real = "/sharepoint/faturas/UTC OLEO E GAS ENGENHARIA S.A./DAVJV/NOV26"
+pasta = tempfile.mkdtemp()
+for _n in os.listdir(_real):
+    if not _n.startswith(("BOLETO_COPARTICIPACAO_", "NFE_COPARTICIPACAO_")):
+        shutil.copy2(os.path.join(_real, _n), pasta)
 anexos, faltas, pend = cc.anexos_copart(pasta, "DAVJV", "NOV26", {"COPARTICIPACAO": {21443.40}}, date(2026, 11, 3))
 nomes = [a[0] for a in anexos]
 ok(all("_COPARTICIPACAO_" in n for n in nomes), "só arquivos da copart vão no complemento")
