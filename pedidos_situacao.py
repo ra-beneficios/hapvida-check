@@ -79,8 +79,43 @@ def _docs(h: dict, cn: str) -> list[dict]:
     return c.get("requiredDocs") or []
 
 
+# 19/11/2026 (André: "você está supondo se está ativo ou batendo com nosso banco? ... é uma validação que tem que estar
+# no robô"): "ativa" na tela só com o CADASTRO da Hapvida dizendo "Ativo" neste contrato — a mesma busca da tela
+# "Beneficiários" do portal (companies/partner-companies/{CT}/beneficiaries?search=CPF). O pedido processado não basta.
+def _cadastro(h: dict, contrato: str, cpf: str) -> list[dict] | None:
+    """-> o cadastro do CPF no contrato ([] = não está), ou None se a consulta falhou."""
+    try:
+        c = _get(h, f"{API}/companies/partner-companies/{contrato}/beneficiaries", offset=0, limit=20, search=cpf)
+    except Exception as e:                                # noqa: BLE001 — sem resposta não é "não está"
+        print(f"[cadastro] {contrato} {cpf[:3]}***: {type(e).__name__}: {str(e)[:120]}")
+        return None
+    out = []
+    for it in c.get("beneficiaries") or []:
+        b = it.get("beneficiary") or {}
+        if re.sub(r"\D", "", str((b.get("user") or {}).get("document") or "")).zfill(11) != cpf:
+            continue
+        out.append({"status": b.get("status"), "carteirinha": b.get("code"), "tipo": b.get("type"),
+                    "contrato": (b.get("contractDetail") or {}).get("partnerCompany"),
+                    "nome": (b.get("user") or {}).get("name")})
+    return out
+
+
+def cadastro(contrato: str, cpfs: list[str]) -> dict:
+    """-> {"vidas": {cpf: [cadastro]}, "falharam": [cpf]} — só leitura."""
+    h = _sessao(contrato)
+    vidas, falharam = {}, []
+    for cpf in sorted({re.sub(r"\D", "", c).zfill(11) for c in cpfs if c}):
+        r = _cadastro(h, contrato, cpf)
+        if r is None:
+            falharam.append(cpf)
+        else:
+            vidas[cpf] = r
+    return {"vidas": vidas, "falharam": falharam}
+
+
 def situacao(contrato: str, cpfs: list[str]) -> dict:
-    """-> {cpf: {...}} só para os CPFs pedidos. Sem pedido de inclusão do CPF nos últimos 180 dias: nao_achou."""
+    """-> {cpf: {...}} só para os CPFs pedidos. Sem pedido de inclusão do CPF nos últimos 180 dias: nao_achou.
+    19/11/2026: cada CPF leva "cadastro" (o que a tela Beneficiários diz dele neste contrato; None = a consulta falhou)."""
     cpfs = {re.sub(r"\D", "", c).zfill(11) for c in cpfs if c}
     h = _sessao(contrato)
     por_cpf: dict[str, dict] = {}
@@ -124,6 +159,8 @@ def situacao(contrato: str, cpfs: list[str]) -> dict:
             except Exception as e:                        # críticas/documentos são complemento: a situação já vale
                 r["erro_detalhe"] = f"{type(e).__name__}: {e}"[:200]
         out[cpf] = r
+    for cpf, r in out.items():
+        r["cadastro"] = _cadastro(h, contrato, cpf)
     return out
 
 

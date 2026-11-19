@@ -574,6 +574,21 @@ def mov_situacao_pedidos(p: SituacaoPedidos):
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
 
+@app.post("/mov/cadastro-contrato")
+def mov_cadastro_contrato(p: SituacaoPedidos):
+    """19/11/2026 (André: "a validação tem que estar no robô"): só leitura — o cadastro de cada CPF no contrato, como a
+    tela Beneficiários do portal mostra (status Ativo/Cancelado..., carteirinha). Quem chama segura a vez no portal."""
+    import re as _re
+    import pedidos_situacao
+    contrato = p.contrato.strip().upper()
+    if not _re.fullmatch(r"[0-9A-Z]{5}", contrato) or not p.cpfs or len(p.cpfs) > 300:
+        raise HTTPException(status_code=400, detail="contrato inválido ou de 1 a 300 CPFs")
+    try:
+        return {"contrato": contrato, **pedidos_situacao.cadastro(contrato, p.cpfs)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
+
+
 class PedidosContrato(BaseModel):
     contrato: str
     dias: int = 179
