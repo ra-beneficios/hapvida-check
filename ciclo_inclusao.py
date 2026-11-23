@@ -169,10 +169,19 @@ def _so_cpfs(xlsx: bytes, cpfs: set[str]) -> tuple[list, list[list], dict]:
 
 
 # ── passo 13: quem ficou ativo + gravar no banco ────────────────────────────────────────────────────────
+def mesmo_papel(tipo: str | None, papel: str | None) -> bool:
+    """Tipo do cadastro da Hapvida (Titular/Dependente) x relação da planilha (01 = titular). Sem tipo: vale o status."""
+    t = normalizar(tipo or "")
+    if not t or not papel:
+        return True
+    return (t == "TITULAR") == (papel == "01")
+
+
 def conferir_ativas(inc: dict, simular: bool) -> tuple[set[str], dict[str, set[str]]]:
     """CPFs que ficaram ativos agora (consulta ao vivo, só dos que faltam) e, por movimentação da inclusão, os que a
     Hapvida CANCELOU depois (19/10/2026, Juracy WP64K: pedido 205/206 cancelado sem documento ficava esquecido)."""
     vidas = {v["cpf"] for v in inc["vidas"] if v.get("cpf")}
+    papel = {v["cpf"]: v.get("papel") for v in inc["vidas"] if v.get("cpf")}
     faltam = sorted(vidas - set(inc["ativas"]))
     novas, cancelados = set(), {}
     if not faltam:
@@ -180,8 +189,10 @@ def conferir_ativas(inc: dict, simular: bool) -> tuple[set[str], dict[str, set[s
     with coleta_portal.sessao(inc["contrato"]) as (page, headers):
         for cpf in faltam:
             det = coleta_portal.certificados_do_cpf(page, headers, inc["contrato"], cpf)
+            # 23/11/2026 (André, MOV-10 l.5/6): ativa no papel pedido — o dependente que a planilha pede como titular
+            # está "Ativo" como dependente, e virava INCLUSAO_CONFIRMADA de titular na base
             if det and any(normalizar((c.get("statusDetail") or {}).get("description") or c.get("_status_lista") or "") == "ATIVO"
-                           for c in det):
+                           and mesmo_papel(c.get("_tipo_lista"), papel.get(cpf)) for c in det):
                 novas.add(cpf)
         try:
             cancelados = _cancelados_novos(page, headers, inc, set(faltam) - novas)
