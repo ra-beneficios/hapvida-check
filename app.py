@@ -522,6 +522,8 @@ class EmailCora(BaseModel):
     html: str
     # 07/11/2026 (MOV-000004): documento que a Hapvida pede sem espaço no portal (ex.: vínculo eSocial/CTPS) vai anexado
     anexos: list[dict] = []        # [{"nome", "mime", "conteudo_b64"}], até 3 MB no total (limite do sendMail simples)
+    # 23/11/2026 (André, REGRA): todo e-mail à Hapvida vai com cópia ao gestor do chamado (o solicitante)
+    cc: list[str] = []
 
 
 # Portal de Movimentações (28/10/2026, decisão 5 do André): interno/operadora sai da cora@. Só aqui há Mail.Send
@@ -537,6 +539,11 @@ def email_cora(p: EmailCora):
     para = [e.strip().lower() for e in p.para if e and e.strip()]
     if not para or len(para) > 10 or not all(e.endswith(EMAIL_CORA_DOMINIOS) for e in para):
         raise HTTPException(status_code=400, detail="destinatário fora da Hapvida/RA")
+    cc = [e.strip().lower() for e in p.cc if e and e.strip()]
+    if len(cc) > 10 or not all(e.endswith("@ra-beneficios.com.br") for e in cc):
+        raise HTTPException(status_code=400, detail="cópia só para a RA")
+    if any(e.endswith("@hapvida.com.br") for e in para) and not cc:
+        raise HTTPException(status_code=400, detail="e-mail à Hapvida sem cópia ao solicitante do chamado")
     if not p.assunto.strip() or len(p.assunto) > 250:
         raise HTTPException(status_code=400, detail="assunto vazio ou grande demais")
     token = enviar_documentos._get_graph_token(enviar_documentos._get_graph_credenciais(os.environ.get("GCP_PROJECT", "")))
@@ -544,6 +551,7 @@ def email_cora(p: EmailCora):
         raise HTTPException(status_code=400, detail="anexos acima de 3 MB")
     msg = {"message": {"subject": p.assunto, "body": {"contentType": "HTML", "content": p.html},
                        "toRecipients": [{"emailAddress": {"address": e}} for e in para],
+                       **({"ccRecipients": [{"emailAddress": {"address": e}} for e in cc]} if cc else {}),
                        **({"attachments": [{"@odata.type": "#microsoft.graph.fileAttachment", "name": a["nome"],
                                             "contentType": a.get("mime") or "application/octet-stream",
                                             "contentBytes": a["conteudo_b64"]} for a in p.anexos]} if p.anexos else {})},
@@ -553,7 +561,7 @@ def email_cora(p: EmailCora):
                     content=_json.dumps(msg), timeout=60)
     if r.status_code >= 300:
         raise HTTPException(status_code=502, detail=f"Graph {r.status_code}: {r.text[:300]}")
-    return {"ok": True, "de": EMAIL_CORA, "para": para}
+    return {"ok": True, "de": EMAIL_CORA, "para": para, "cc": cc}
 
 
 class SituacaoPedidos(BaseModel):
