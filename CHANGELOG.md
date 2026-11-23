@@ -2,6 +2,11 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.23-1 — 23/11/2026 — e-mail à Hapvida sempre com cópia ao solicitante
+- REGRA do André (23/11): todo e-mail autorizado à Hapvida vai com cópia ao gestor do chamado (o solicitante; chamado do sistema: o dono).
+  `/email/cora` aceita `cc` (só @ra-beneficios.com.br) e recusa e-mail para @hapvida.com.br sem cópia. No lifetools: envio.copia + rede de proteção em envio._hapvida + verificador `email_hapvida_sem_copia`.
+- Publicados juntos: a janela de 180 dias (22/11) e o download/auditoria de quem já foi enviado (23/11), abaixo.
+
 ## (próxima) 22/11/2026 — pedido com mais de 180 dias sumia da conferência e do inventário
 - **Leitura dos pedidos do contrato** (varredura, MOV-25 l.1/2, pedido 64250137 de 20/05/2026):
   - a Hapvida recusa intervalo de mais de 180 dias e a Cora lia só os últimos 179; o pedido mais velho virava "sem pedido" na conferência, parava de ser visto no inventário (13/11) e a tela seguia "Pendente, conferido hoje" com o dado congelado;
