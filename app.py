@@ -591,7 +591,7 @@ def mov_cadastro_contrato(p: SituacaoPedidos):
 
 class PedidosContrato(BaseModel):
     contrato: str
-    dias: int = 179
+    dias: int = 540          # 22/11/2026: pedaços de 179 dias até 18 meses (pedidos_situacao.HORIZONTE)
 
 
 class CriticasContrato(BaseModel):
@@ -626,7 +626,7 @@ def mov_pedidos_contrato(p: PedidosContrato):
         raise HTTPException(status_code=400, detail="contrato inválido")
     try:
         h = pedidos_situacao._sessao(contrato)
-        return {"contrato": contrato, "movimentos": pedidos_situacao._pedidos(h, contrato, max(1, min(p.dias, 179)))}
+        return {"contrato": contrato, "movimentos": pedidos_situacao._pedidos(h, contrato, max(1, min(p.dias, pedidos_situacao.HORIZONTE)))}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 

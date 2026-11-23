@@ -37,9 +37,15 @@ def _get(h: dict, url: str, **params) -> dict:
     raise RuntimeError(f"Hapvida respondeu {r.status_code} em {url.rsplit('/', 2)[-2:]}: {r.text[:200]}")
 
 
-def _pedidos(h: dict, contrato: str, dias: int = 179) -> list[dict]:
-    fim = date.today()
-    ini = fim - timedelta(days=dias)
+# 22/11/2026 (varredura, MOV-25 l.1/2 Eric e Alzira, pedido 64250137 de 20/05): a Hapvida só aceita intervalo de até
+# 180 dias, e o pedido mais velho que isso sumia de tudo — a conferência dizia "sem pedido", o inventário parava de vê-lo
+# (13/11) e a tela seguia "Pendente, conferido hoje" com o dado congelado. O limite é o TAMANHO do intervalo, não até
+# quando dá para voltar: a Cora lê em pedaços de JANELA dias, do mais novo para o mais velho, até HORIZONTE.
+JANELA = 179
+HORIZONTE = 540            # 18 meses; o pedido aberto mais antigo do inventário em 22/11 é de 20/05/2026
+
+
+def _janela(h: dict, contrato: str, ini: date, fim: date) -> list[dict]:
     out, off = [], 0
     while True:
         c = _get(h, f"{API}/movements/status/partner-company/{contrato}/operation-types",
@@ -49,6 +55,25 @@ def _pedidos(h: dict, contrato: str, dias: int = 179) -> list[dict]:
         off += len(lote)
         if not lote or off >= int(c.get("total") or 0):
             return out
+
+
+def _pedidos(h: dict, contrato: str, dias: int = HORIZONTE, basta=None) -> list[dict]:
+    """Todos os movimentos do contrato nos últimos `dias`, em pedaços de JANELA dias (sem repetir). basta(movimentos)
+    -> True para no pedaço em que já tem o que precisa (a conferência: todos os CPFs achados)."""
+    fim = date.today()
+    limite = fim - timedelta(days=max(1, dias))
+    out, vistos = [], set()
+    while fim >= limite:
+        ini = max(limite, fim - timedelta(days=JANELA))
+        for m in _janela(h, contrato, ini, fim):
+            chave = (m.get("controlNumber"), m.get("dependentControlNumber"), m.get("cpfNumber"), m.get("operationDescription"))
+            if chave not in vistos:
+                vistos.add(chave)
+                out.append(m)
+        if basta and basta(out):
+            break
+        fim = ini - timedelta(days=1)
+    return out
 
 
 TIPOS_INCLUSAO = ("Inclusion", "DependentInclusion", "Transfer")
@@ -114,12 +139,15 @@ def cadastro(contrato: str, cpfs: list[str]) -> dict:
 
 
 def situacao(contrato: str, cpfs: list[str]) -> dict:
-    """-> {cpf: {...}} só para os CPFs pedidos. Sem pedido de inclusão do CPF nos últimos 180 dias: nao_achou.
+    """-> {cpf: {...}} só para os CPFs pedidos. Sem pedido de inclusão do CPF nos últimos HORIZONTE dias: nao_achou.
     19/11/2026: cada CPF leva "cadastro" (o que a tela Beneficiários diz dele neste contrato; None = a consulta falhou)."""
     cpfs = {re.sub(r"\D", "", c).zfill(11) for c in cpfs if c}
     h = _sessao(contrato)
     por_cpf: dict[str, dict] = {}
-    for m in _pedidos(h, contrato):
+
+    def achou_todos(movs):            # o pedido mais recente está no pedaço mais novo: só volta mais se faltar alguém
+        return cpfs <= {str(m.get("cpfNumber") or "").zfill(11) for m in movs if m.get("operationDescription") in TIPOS_INCLUSAO}
+    for m in _pedidos(h, contrato, basta=achou_todos):
         cpf = str(m.get("cpfNumber") or "").zfill(11)
         # 08/11/2026 (auditoria MOV, código da tela da Hapvida): os tipos são Inclusion, DependentInclusion, Transfer,
         # Alteration, CancellationExclusion, Suspension, Reactivation. Só "Inclusion" era lido: a vida que entrou como
