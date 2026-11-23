@@ -765,6 +765,36 @@ def codigos_ja_enviados(comp: str) -> set[str]:
     return {c for r in registros if r.get("status") in ("enviado", "reenviado") for c in r["codigos"].split("+")}
 
 
+def faturas_sem_envio(comp: str, saude: dict[str, set[str]] | None = None) -> dict[str, set[str]]:
+    """23/11/2026 (André, caso UTC NOV26): contrato JÁ ENVIADO com fatura do mês que nunca foi ao cliente -
+    tipicamente a copart que a Hapvida emite depois do envio. codigo -> tipos (SAUDE/COPARTICIPACAO) sem envio.
+    Portal novo pela base de faturas; Saúde do Legado pelo status (2 boletos no mês = mensalidade + copart).
+    Os downloads (26, último dia, 04) e a auditoria olham esses contratos em vez de pular 'já enviado'."""
+    try:
+        with open(os.path.join(BASE, "_status", f"ENVIOS_{comp}.json"), encoding="utf-8") as f:
+            registros = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    enviados = {c for r in registros if r.get("status") in ("enviado", "reenviado") for c in r["codigos"].split("+")}
+    levados = " ".join(a.upper() for r in registros if r.get("status") in ("enviado", "reenviado", "complemento")
+                       for a in r.get("arquivos") or [])
+    por_codigo = dict(saude if saude is not None else contratos_saude(comp))
+    legado = contratos_legado()
+    mods = modalidades(set(legado)) if legado else {}
+    st = status_legado(comp)
+    for c in legado:
+        if c not in por_codigo and pf.PLANO_DA_MODALIDADE.get(mods.get(c)) == "SAUDE" and c in st:
+            por_codigo[c] = {"SAUDE"} | ({"COPARTICIPACAO"} if len(st[c]["boletos"]) >= 2 else set())
+    res = {}
+    for c, tipos in por_codigo.items():
+        if c not in enviados:
+            continue
+        faltam = {t for t in tipos if f"BOLETO_{t}_{c}_" not in levados}
+        if faltam:
+            res[c] = faltam
+    return res
+
+
 def modalidades(codigos: set[str]) -> dict[str, str]:
     conn = psycopg2.connect(dbname="lifetools")
     try:
@@ -783,14 +813,18 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str], assum
     status_cw = status_legado(comp)
     anterior = competencia_anterior(comp)
     enviados = codigos_ja_enviados(comp)
+    sem_envio = faturas_sem_envio(comp, saude)
     mods = modalidades(set(legado))
     linhas = []
     for codigo, tipos in sorted(saude.items()):
         pasta = pasta_contrato(codigo, comp)
-        if codigo in enviados:
+        if codigo in enviados and codigo not in sem_envio:
             linhas.append({"grupo": "Saúde", "codigo": codigo, "pasta": pasta, "falta": [], "obs": "já enviado"})
             continue
         falta = faltando_saude(codigo, tipos, comp, conferir=True)
+        if codigo in sem_envio:
+            falta = [f for f in falta if any(f"_{t}_" in f for t in sem_envio[codigo])]
+            falta.append(f"fatura de {'/'.join(sorted(sem_envio[codigo])).lower()} emitida depois do envio - vai pelo complemento")
         fora = pf.fora_do_padrao(arquivos(pasta))
         obs = f"fora do padrão (não vai pro cliente): {', '.join(fora)}" if fora else ""
         linhas.append({"grupo": "Saúde", "codigo": codigo, "pasta": pasta, "falta": falta, "obs": obs})
@@ -800,7 +834,7 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str], assum
         pasta = pasta_contrato(codigo, comp, empresa)
         # 09/10/2026 (Andre): sem separacao Code x Cowork - tudo e' do Code; contrato sem credencial vira pendencia de cadastro
         grupo = "Legado"
-        if codigo in enviados:
+        if codigo in enviados and codigo not in sem_envio:
             linhas.append({"grupo": grupo, "codigo": codigo, "pasta": pasta, "falta": [], "obs": "já enviado"})
             continue
         nomes = arquivos(pasta)
@@ -824,6 +858,9 @@ def auditar(comp: str, saude: dict[str, set[str]], legado: dict[str, str], assum
         fora = pf.fora_do_padrao(nomes)
         if fora:
             obs.append(f"fora do padrão (não vai pro cliente): {', '.join(fora)}")
+        if codigo in sem_envio:
+            falta = [f for f in falta if any(f"_{t}_" in f for t in sem_envio[codigo])]
+            falta.append(f"fatura de {'/'.join(sorted(sem_envio[codigo])).lower()} emitida depois do envio - vai pelo complemento")
         if codigo not in assumidos:
             obs.append("sem credencial válida no Bitwarden (código, senha e CNPJ de 14 dígitos) - o Code não baixa até cadastrar")
         linhas.append({"grupo": grupo, "codigo": codigo, "pasta": pasta, "falta": falta, "obs": "; ".join(obs)})
@@ -900,7 +937,7 @@ def legado_assumido(legado: dict[str, str]) -> tuple[set[str], dict]:
 def baixar_legado(legado: dict[str, str], assumidos: set[str], creds: dict, comp: str) -> dict[str, list[str]]:
     mes, ano = competencia_para_mes(comp)
     mods = modalidades(assumidos)
-    enviados = codigos_ja_enviados(comp)
+    enviados = codigos_ja_enviados(comp) - set(faturas_sem_envio(comp))
     avisos: dict[str, list[str]] = {}
     status: list[dict] = []
     for codigo in sorted(assumidos - enviados):
@@ -978,7 +1015,10 @@ def main() -> None:
         }
         erros_lista += atualizar_faturas(creds)
         saude = contratos_saude(comp)
-        enviados = codigos_ja_enviados(comp)
+        sem_envio = faturas_sem_envio(comp, saude)
+        enviados = codigos_ja_enviados(comp) - set(sem_envio)
+        if sem_envio:
+            log(f"já enviados com fatura do mês sem envio (baixa de novo): {', '.join(f'{c} {sorted(t)}' for c, t in sorted(sem_envio.items()))}")
         a_baixar = {c: t for c, t in saude.items() if c not in enviados}
         log(f"{len(saude)} contrato(s) Saúde com mensalidade em {comp}, {len(saude) - len(a_baixar)} já enviado(s)")
         try:

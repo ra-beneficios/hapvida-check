@@ -8,6 +8,12 @@ Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifeto
   - o limite é o tamanho do intervalo, não até quando dá para voltar (testado no XEIJL: maio–junho responde): `pedidos_situacao._pedidos` lê em pedaços de 179 dias até 18 meses (`HORIZONTE`), sem repetir; a conferência só volta no tempo quando falta CPF; `/mov/pedidos-contrato` e o cancelamento de pedido usam o horizonte.
   - Teste: tests/teste_pedidos_janela.py (na trava da publicação). No lifetools, verificador `pedido_que_a_cora_nao_ve`.
 
+## (próxima) 23/11/2026 — download e auditoria olham também quem já foi enviado
+- André (caso UTC NOV26: "é verificar se há fatura para baixar, o que não é feito hoje"): contrato já enviado era pulado nos downloads (26, último dia, 04) e na auditoria; a copart da UTC entrou na base em 31/10 e ninguém olhou.
+  - `fm.faturas_sem_envio`: contrato enviado com fatura do mês que nunca foi ao cliente (portal novo pela base; Saúde do Legado pelo 2º boleto no status);
+  - esses contratos voltam ao download e aparecem na auditoria ("emitida depois do envio - vai pelo complemento"); o envio ao cliente continua só pelo complemento.
+  - Teste: tests/teste_complemento_copart.py (na trava).
+
 ## (próxima) 19/11/2026 — copart do mês não baixava quando a do mês seguinte já existia
 - **Download do portal novo** (MID YXF01, UTC DAVJV, THREENG X98VE; André viu o boleto de copart em aberto na MID e fora da pasta):
   - a busca pegava a fatura mais recente de cada tipo e só depois filtrava o mês da mensalidade; com a copart de dezembro (vence 10/12) emitida, a de novembro sumia e nenhum boleto de copart era baixado — nem pelo faturamento, nem pelo complemento;

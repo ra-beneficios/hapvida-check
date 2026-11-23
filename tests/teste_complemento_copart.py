@@ -79,6 +79,27 @@ if Z8:
     r = legado_auto.escolher_relatorios({**arqs, "EMPRESA_FM_PSICO_Z8TUR_REMESSA_123.CSV": csv}, "Z8TUR", 11, 2026)
     ok(r["copart"].get("csv") == csv and not r["copart"].get("so_pdf"), "com o CSV na Troca, o CSV continua sendo a fonte")
 
+# --- downloads e auditoria (23/11/2026, André: "verificar se há fatura para baixar" também em contrato já enviado)
+import json  # noqa: E402
+import faturamento_mensal as fm  # noqa: E402
+_d = tempfile.mkdtemp()
+os.makedirs(os.path.join(_d, "_status"))
+json.dump(log, open(os.path.join(_d, "_status", "ENVIOS_NOV26.json"), "w"))
+_base, fm.BASE = fm.BASE, _d
+_orig = fm.contratos_legado, fm.modalidades, fm.status_legado
+fm.contratos_legado = lambda: {"Z8TUR": "APJ", "611X2": "X"}
+fm.modalidades = lambda cods: {"Z8TUR": "SAUDE", "611X2": "ODONTO_PREMIUM"}
+fm.status_legado = lambda comp: {"Z8TUR": {"boletos": {"1", "2"}}, "611X2": {"boletos": {"3"}}}
+log.append({"codigos": "Z8TUR", "status": "enviado", "arquivos": ["BOLETO_SAUDE_Z8TUR_NOV26.pdf"]})
+log.append({"codigos": "611X2", "status": "enviado", "arquivos": ["BOLETO_ODONTO_611X2_NOV26.pdf"]})
+json.dump(log, open(os.path.join(_d, "_status", "ENVIOS_NOV26.json"), "w"))
+se = fm.faturas_sem_envio("NOV26", saude)
+ok(se.get("DAVJV") == {"COPARTICIPACAO"}, f"já enviado com copart que não foi: volta para baixar ({se})")
+ok("4DFEV" not in se and "X98VE" not in se and "KGBQY" not in se, "levou a copart, complemento feito ou não enviado: fora")
+ok(se.get("Z8TUR") == {"COPARTICIPACAO"} and "611X2" not in se, "Legado Saúde com 2º boleto sem envio entra; Odonto não")
+fm.BASE = _base
+fm.contratos_legado, fm.modalidades, fm.status_legado = _orig
+
 # --- e-mail
 corpo = cc.corpo_cliente(log[0], "DAVJV", "10/11/2026", [{"nome": "BOLETO_COPARTICIPACAO_DAVJV_NOV26.pdf", "descricao": "Boleto"}], "")
 ok("coparticipação" in corpo and "27/10/2026" in corpo and "10/11/2026" in corpo, "e-mail do cliente diz o que é e o vencimento")
