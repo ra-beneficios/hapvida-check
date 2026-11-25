@@ -107,8 +107,11 @@ def _docs(h: dict, cn: str) -> list[dict]:
 # 19/11/2026 (André: "você está supondo se está ativo ou batendo com nosso banco? ... é uma validação que tem que estar
 # no robô"): "ativa" na tela só com o CADASTRO da Hapvida dizendo "Ativo" neste contrato — a mesma busca da tela
 # "Beneficiários" do portal (companies/partner-companies/{CT}/beneficiaries?search=CPF). O pedido processado não basta.
-def _cadastro(h: dict, contrato: str, cpf: str) -> list[dict] | None:
-    """-> o cadastro do CPF no contrato ([] = não está), ou None se a consulta falhou."""
+def _cadastro(h: dict, contrato: str, cpf: str, saida: bool = False) -> list[dict] | None:
+    """-> o cadastro do CPF no contrato ([] = não está), ou None se a consulta falhou.
+    25/11/2026 (André, MOV-61 l.7 Fabiano: "a data tem que estar registrada no beneficiário na Hapvida. Não pode ser
+    dedução"): `saida` lê a ficha de cada beneficiário (/beneficiaries/{carteirinha}) e traz a data de saída gravada
+    nela (cancellationAt) — é o que a tela do beneficiário mostra. Ficha que não responde = a consulta falhou (None)."""
     try:
         c = _get(h, f"{API}/companies/partner-companies/{contrato}/beneficiaries", offset=0, limit=20, search=cpf)
     except Exception as e:                                # noqa: BLE001 — sem resposta não é "não está"
@@ -119,18 +122,27 @@ def _cadastro(h: dict, contrato: str, cpf: str) -> list[dict] | None:
         b = it.get("beneficiary") or {}
         if re.sub(r"\D", "", str((b.get("user") or {}).get("document") or "")).zfill(11) != cpf:
             continue
-        out.append({"status": b.get("status"), "carteirinha": b.get("code"), "tipo": b.get("type"),
-                    "contrato": (b.get("contractDetail") or {}).get("partnerCompany"),
-                    "nome": (b.get("user") or {}).get("name")})
+        v = {"status": b.get("status"), "carteirinha": b.get("code"), "tipo": b.get("type"),
+             "contrato": (b.get("contractDetail") or {}).get("partnerCompany"),
+             "nome": (b.get("user") or {}).get("name")}
+        if saida and v["carteirinha"]:
+            try:
+                f = _get(h, f"{API}/beneficiaries/{v['carteirinha']}")
+            except Exception as e:                        # noqa: BLE001 — sem a ficha não há data: não deduz
+                print(f"[cadastro] ficha {contrato} {cpf[:3]}***: {type(e).__name__}: {str(e)[:120]}")
+                return None
+            v["saida"] = (f.get("cancellationAt") or "").strip() or None
+            v["situacao"] = (f.get("statusDetail") or {}).get("description") or v["status"]
+        out.append(v)
     return out
 
 
-def cadastro(contrato: str, cpfs: list[str]) -> dict:
-    """-> {"vidas": {cpf: [cadastro]}, "falharam": [cpf]} — só leitura."""
+def cadastro(contrato: str, cpfs: list[str], saida: bool = False) -> dict:
+    """-> {"vidas": {cpf: [cadastro]}, "falharam": [cpf]} — só leitura. `saida`: com a data de saída da ficha."""
     h = _sessao(contrato)
     vidas, falharam = {}, []
     for cpf in sorted({re.sub(r"\D", "", c).zfill(11) for c in cpfs if c}):
-        r = _cadastro(h, contrato, cpf)
+        r = _cadastro(h, contrato, cpf, saida)
         if r is None:
             falharam.append(cpf)
         else:

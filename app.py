@@ -567,6 +567,7 @@ def email_cora(p: EmailCora):
 class SituacaoPedidos(BaseModel):
     contrato: str
     cpfs: list[str]
+    saida: bool = False          # 25/11/2026: /mov/cadastro-contrato com a data de saída gravada na ficha
 
 
 @app.post("/mov/situacao-pedidos")
@@ -592,7 +593,7 @@ def mov_cadastro_contrato(p: SituacaoPedidos):
     if not _re.fullmatch(r"[0-9A-Z]{5}", contrato) or not p.cpfs or len(p.cpfs) > 300:
         raise HTTPException(status_code=400, detail="contrato inválido ou de 1 a 300 CPFs")
     try:
-        return {"contrato": contrato, **pedidos_situacao.cadastro(contrato, p.cpfs)}
+        return {"contrato": contrato, **pedidos_situacao.cadastro(contrato, p.cpfs, p.saida)}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}"[:300])
 
