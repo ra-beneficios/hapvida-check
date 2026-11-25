@@ -2,6 +2,10 @@
 
 Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifetools). Reverter: `--reverter <tag anterior>`.
 
+## hc-2026.11.25-3 — 25/11/2026 — verificador: vida que a Hapvida não tem
+- André (25/11): "não podemos deixar de incluir nenhuma vida por dedução de crítica/pendência nossa". Cruzamento ao vivo de 165 vidas abertas: nenhuma presa por dedução nossa.
+- No lifetools (c688d95): verificador `vida_que_a_hapvida_nao_tem` avisa a TI (6h) da vida de inclusão enviada há mais de 1 dia sem pedido na Hapvida, sem crítica dela no arquivo e não ativa (fora: espera do titular, regra 1, e transferência em andamento). Jornada J70. Nada mudou no código do hapvida-check.
+
 ## hc-2026.11.23-1 — 23/11/2026 — e-mail à Hapvida sempre com cópia ao solicitante
 - REGRA do André (23/11): todo e-mail autorizado à Hapvida vai com cópia ao gestor do chamado (o solicitante; chamado do sistema: o dono).
   `/email/cora` aceita `cc` (só @ra-beneficios.com.br) e recusa e-mail para @hapvida.com.br sem cópia. No lifetools: envio.copia + rede de proteção em envio._hapvida + verificador `email_hapvida_sem_copia`.
