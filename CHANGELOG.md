@@ -5,7 +5,7 @@ Uma entrada por publicação (`infra/deploy/publicar_hapvida_check.sh` no lifeto
 ## hc-2026.11.25-4 — 25/11/2026 — exclusão conferida no cadastro (Saúde + Odonto Premium)
 - André (25/11, MOV-61 l.7 Fabiano: tela "Excluída", Saúde com data e Odonto Premium sem nada): "a data tem que estar registrada no beneficiário na Hapvida. Não pode ser dedução"; "tem que cancelar no Saúde e no Odonto Premium".
 - `/mov/cadastro-contrato` com `saida: true` lê a ficha de cada beneficiário (`/beneficiaries/{carteirinha}`) e traz `saida` (cancellationAt) e `situacao`. Ficha que não responde = consulta falhou (não deduz).
-- No lifetools (a181d22): CPF da exclusão pela vida do motor (a planilha modelo não tem CPF: o Premium nunca era pré-cancelado); Premium sai junto com a Saúde pedida; `exclusao.conferir_saidas` na rodada — Programado com a data da ficha, Excluída quando a Saúde e o Premium saíram; chamado "Em andamento".
+- No lifetools (a181d22 + chave curta do pré-cancelamento): CPF da exclusão pela vida do motor (a planilha modelo não tem CPF: o Premium nunca era pré-cancelado); Premium sai junto com a Saúde pedida; `exclusao.conferir_saidas` na rodada — Programado com a data da ficha, Excluída quando a Saúde e o Premium saíram; chamado "Em andamento".
 
 ## hc-2026.11.25-3 — 25/11/2026 — verificador: vida que a Hapvida não tem
 - André (25/11): "não podemos deixar de incluir nenhuma vida por dedução de crítica/pendência nossa". Cruzamento ao vivo de 165 vidas abertas: nenhuma presa por dedução nossa.
